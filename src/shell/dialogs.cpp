@@ -183,8 +183,12 @@ Request Read(HWND dlg) {
     std::wstring ok = Text(GetDlgItem(dlg, IDOK));
     for (auto& ch : ok) ch = towlower(ch);
     HWND combo = TypeCombo(dlg);
-    if (ok.find(L"salv") != std::wstring::npos || ok.find(L"save") != std::wstring::npos) r.mode = 1;
-    else if (ok.find(L"pasta") != std::wstring::npos || ok.find(L"folder") != std::wstring::npos || !combo) r.mode = 2;
+    // o texto do OK no idioma do Windows: antes só "salv"/"save" e "pasta"/"folder", e no Windows em coreano
+    // ("저장(&S)", "폴더 선택") a janela de Salvar abria o Finder em modo Abrir: o nome digitado não valia e o OK
+    // só fazia o bipe (21/11/2026, salvar um arquivo pelo app do Claude)
+    auto has = [&](std::initializer_list<const wchar_t*> ws) { for (auto w : ws) if (ok.find(w) != std::wstring::npos) return true; return false; };
+    if (has({ L"salv", L"save", L"저장", L"保存", L"guard", L"enregistr", L"speicher", L"сохран", L"zapisz", L"kaydet" })) r.mode = 1;
+    else if (has({ L"pasta", L"folder", L"폴더", L"フォルダー", L"文件夹", L"資料夾", L"carpeta", L"dossier", L"ordner", L"cartella", L"папк", L"klasör" }) || !combo) r.mode = 2;
     if (combo) {  // "Imagens (*.png;*.jpg)" → descrição + padrões
         int n = (int)SendMessageW(combo, CB_GETCOUNT, 0, 0);
         for (int i = 0; i < n && i < 64; i++) {
