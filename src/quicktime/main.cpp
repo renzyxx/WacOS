@@ -26,6 +26,31 @@ std::wstring g_path;
 bool g_full = false, g_ended = false, g_ready = false, g_noVideo = false;  // noVideo: só som (sem o codec da imagem)
 WINDOWPLACEMENT g_place{ sizeof(g_place) };
 float g_volume = 1.0f;
+// o volume fica guardado entre as aberturas (%APPDATA%\Shell\quicktime.txt, "volume=0.35"): antes cada vídeo
+// aberto com duplo clique voltava a 100 %
+std::wstring VolumeFile() {
+    wchar_t ad[MAX_PATH] = {};
+    if (!GetEnvironmentVariableW(L"APPDATA", ad, MAX_PATH)) return L"";
+    return std::wstring(ad) + L"\\Shell\\quicktime.txt";
+}
+void LoadVolume() {
+    FILE* f = nullptr;
+    std::wstring p = VolumeFile();
+    if (p.empty() || _wfopen_s(&f, p.c_str(), L"r") || !f) return;
+    float v = -1;
+    if (fwscanf_s(f, L"volume=%f", &v) == 1 && v >= 0 && v <= 1) g_volume = v;
+    fclose(f);
+}
+void SaveVolume() {
+    static float saved = -1;
+    if (std::fabs(saved - g_volume) < 0.001f) return;
+    FILE* f = nullptr;
+    std::wstring p = VolumeFile();
+    if (p.empty() || _wfopen_s(&f, p.c_str(), L"w") || !f) return;
+    fwprintf(f, L"volume=%.3f\n", g_volume);
+    fclose(f);
+    saved = g_volume;
+}
 DWORD g_lastMove = 0;
 bool g_barShown = false, g_scrubbing = false;
 IDWriteTextFormat *g_tfTime, *g_tfIcon, *g_tfIconBig, *g_tfTitle;
@@ -264,6 +289,7 @@ void BarAction(int id, float x) {
     case B_VOL: for (auto& h : g_hits) if (h.id == B_VOL) {
             g_volume = semaforo::Aqua() ? barravideo::VolumeEm(h.r, x) : std::clamp((x - h.r.left - 4) / (h.r.right - h.r.left - 8), 0.f, 1.f);
             if (g_mp) g_mp->SetVolume(g_volume);
+            SaveVolume();
         } break;
     case B_BACK: Seek(Pos() - 15); break;
     case B_FWD: Seek(Pos() + 15); break;
@@ -456,8 +482,8 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         else if (w == VK_RIGHT) Seek(Pos() + 5);
         else if (w == 'J') Seek(Pos() - 10);
         else if (w == 'L') Seek(Pos() + 10);
-        else if (w == VK_UP) { g_volume = std::min(1.f, g_volume + 0.1f); if (g_mp) g_mp->SetVolume(g_volume); }
-        else if (w == VK_DOWN) { g_volume = std::max(0.f, g_volume - 0.1f); if (g_mp) g_mp->SetVolume(g_volume); }
+        else if (w == VK_UP) { g_volume = std::min(1.f, g_volume + 0.1f); if (g_mp) g_mp->SetVolume(g_volume); SaveVolume(); }
+        else if (w == VK_DOWN) { g_volume = std::max(0.f, g_volume - 0.1f); if (g_mp) g_mp->SetVolume(g_volume); SaveVolume(); }
         else if ((ctrl && w == 'F') || (w == 'F' && l == 1)) SetFull(!g_full);
         else if (w == VK_ESCAPE && g_full) SetFull(false);
         else if (ctrl && w == 'O') OpenDialog();
@@ -482,6 +508,7 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
+    LoadVolume();  // o volume da última vez
     if (!Init()) return 1;
     MFStartup(MF_VERSION);
     g_tfTime = Fmt(11, DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_TEXT_ALIGNMENT_CENTER);
