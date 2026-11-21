@@ -490,6 +490,8 @@
 { L"Ícones que os aplicativos põem na área de notificação do Windows.", L"App 放在 Windows 通知区域中的图标。" },
 { L"Dia, data e hora", L"星期、日期和时间" },
 { L"Só a hora", L"仅时间" },
+{ L"Relógio de 12 horas (AM/PM)", L"12 小时制（上午/下午）" },
+{ L"Mostrar os segundos", L"显示秒" },
 { L"Pequeno", L"小" },
 { L"Grande", L"大" },
 { L"Ampliação", L"放大" },

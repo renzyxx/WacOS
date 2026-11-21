@@ -490,6 +490,8 @@
 { L"Ícones que os aplicativos põem na área de notificação do Windows.", L"Iconos que las apps ponen en el área de notificación de Windows." },
 { L"Dia, data e hora", L"Día, fecha y hora" },
 { L"Só a hora", L"Solo la hora" },
+{ L"Relógio de 12 horas (AM/PM)", L"Reloj de 12 horas (AM/PM)" },
+{ L"Mostrar os segundos", L"Mostrar los segundos" },
 { L"Pequeno", L"Pequeño" },
 { L"Grande", L"Grande" },
 { L"Ampliação", L"Ampliación" },

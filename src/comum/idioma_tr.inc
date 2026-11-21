@@ -490,6 +490,8 @@
 { L"Ícones que os aplicativos põem na área de notificação do Windows.", L"Uygulamaların Windows bildirim alanına koyduğu simgeler." },
 { L"Dia, data e hora", L"Gün, tarih ve saat" },
 { L"Só a hora", L"Yalnızca saat" },
+{ L"Relógio de 12 horas (AM/PM)", L"12 saatlik saat (ÖÖ/ÖS)" },
+{ L"Mostrar os segundos", L"Saniyeleri göster" },
 { L"Pequeno", L"Küçük" },
 { L"Grande", L"Büyük" },
 { L"Ampliação", L"Büyütme" },

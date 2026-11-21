@@ -490,6 +490,8 @@
 { L"Ícones que os aplicativos põem na área de notificação do Windows.", L"앱이 Windows 알림 영역에 넣는 아이콘." },
 { L"Dia, data e hora", L"요일, 날짜 및 시간" },
 { L"Só a hora", L"시간만" },
+{ L"Relógio de 12 horas (AM/PM)", L"12시간제 (오전/오후)" },
+{ L"Mostrar os segundos", L"초 표시" },
 { L"Pequeno", L"작게" },
 { L"Grande", L"크게" },
 { L"Ampliação", L"확대" },

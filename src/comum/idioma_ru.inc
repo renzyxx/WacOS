@@ -490,6 +490,8 @@
 { L"Ícones que os aplicativos põem na área de notificação do Windows.", L"Значки, которые программы помещают в область уведомлений Windows." },
 { L"Dia, data e hora", L"День, дата и время" },
 { L"Só a hora", L"Только время" },
+{ L"Relógio de 12 horas (AM/PM)", L"12-часовой формат (AM/PM)" },
+{ L"Mostrar os segundos", L"Показывать секунды" },
 { L"Pequeno", L"Маленький" },
 { L"Grande", L"Большой" },
 { L"Ampliação", L"Увеличение" },

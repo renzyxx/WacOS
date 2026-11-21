@@ -490,6 +490,8 @@
 { L"Ícones que os aplicativos põem na área de notificação do Windows.", L"Ikony, które aplikacje umieszczają w obszarze powiadomień Windows." },
 { L"Dia, data e hora", L"Dzień, data i godzina" },
 { L"Só a hora", L"Tylko godzina" },
+{ L"Relógio de 12 horas (AM/PM)", L"Zegar 12-godzinny (AM/PM)" },
+{ L"Mostrar os segundos", L"Pokaż sekundy" },
 { L"Pequeno", L"Mały" },
 { L"Grande", L"Duży" },
 { L"Ampliação", L"Powiększanie" },

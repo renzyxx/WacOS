@@ -490,6 +490,8 @@
 { L"Ícones que os aplicativos põem na área de notificação do Windows.", L"アプリがWindowsの通知領域に置くアイコン。" },
 { L"Dia, data e hora", L"曜日、日付、時刻" },
 { L"Só a hora", L"時刻のみ" },
+{ L"Relógio de 12 horas (AM/PM)", L"12時間表示（午前/午後）" },
+{ L"Mostrar os segundos", L"秒を表示" },
 { L"Pequeno", L"小" },
 { L"Grande", L"大" },
 { L"Ampliação", L"拡大" },

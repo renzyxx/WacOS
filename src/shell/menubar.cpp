@@ -431,10 +431,22 @@ std::wstring ClockText() {
         swprintf_s(buf, L"%ls %ls", dd.c_str(), tm);
         return buf;
     }
-    if (shell::Setting(L"relogio_curto", L"0") == L"1") swprintf_s(buf, L"%02d:%02d", st.wHour, st.wMinute);
-    else if (idioma::En()) swprintf_s(buf, L"%ls %ls %d  %02d:%02d", d.c_str(), m.c_str(), st.wDay, st.wHour, st.wMinute);  // Tue Nov 10
-    else if (idioma::Pt()) swprintf_s(buf, L"%ls %d de %ls  %02d:%02d", d.c_str(), st.wDay, m.c_str(), st.wHour, st.wMinute);
-    else swprintf_s(buf, L"%ls  %02d:%02d", idioma::Date(st, idioma::D_WEEKDAY_SHORT).c_str(), st.wHour, st.wMinute);  // ven. 20 nov., 11月20日(金)
+    // Ajustes > Barra de Menus > Relógio: 12 horas (AM/PM, "오후 3:26" em coreano) e segundos, como no macOS
+    // (Ajustes do Sistema > Central de Controle > Relógio > "Mostrar AM/PM" e "Mostrar os segundos")
+    const bool h12 = shell::Setting(L"relogio_12h", L"0") == L"1", sec = shell::Setting(L"relogio_segundos", L"0") == L"1";
+    wchar_t tm[32] = {};
+    if (h12) {
+        // AM/PM antes da hora em japonês, coreano e chinês (오후 3:26, 午後3:26), depois nos outros (3:26 PM)
+        const int lang = idioma::Current();
+        const bool before = lang == idioma::JA || lang == idioma::KO || lang == idioma::ZH;
+        const wchar_t* fmt = before ? (sec ? L"tt h:mm:ss" : L"tt h:mm") : (sec ? L"h:mm:ss tt" : L"h:mm tt");
+        if (!GetTimeFormatEx(loc, 0, &st, fmt, tm, 32)) swprintf_s(tm, L"%d:%02d", (st.wHour + 11) % 12 + 1, st.wMinute);
+    } else if (sec) swprintf_s(tm, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
+    else swprintf_s(tm, L"%02d:%02d", st.wHour, st.wMinute);
+    if (shell::Setting(L"relogio_curto", L"0") == L"1") swprintf_s(buf, L"%ls", tm);
+    else if (idioma::En()) swprintf_s(buf, L"%ls %ls %d  %ls", d.c_str(), m.c_str(), st.wDay, tm);  // Tue Nov 10
+    else if (idioma::Pt()) swprintf_s(buf, L"%ls %d de %ls  %ls", d.c_str(), st.wDay, m.c_str(), tm);
+    else swprintf_s(buf, L"%ls  %ls", idioma::Date(st, idioma::D_WEEKDAY_SHORT).c_str(), tm);  // ven. 20 nov., 11月20日(金)
     return buf;
 }
 
