@@ -365,7 +365,9 @@ bool Start(HWND h) {
     // janela por faixa bastam. Eram ~3 px (até 200 faixas, 700 no total): montar tudo levava ~30 ms antes de a janela
     // se mexer, e numa GTX 1660 a "pausa antes de minimizar" aparecia (Reddit, 20/11/2026)
     const int n0 = std::clamp((int)((g_a.win.bottom - g_a.win.top) / 6), 24, 110);
-    auto stripsOf = [&](int lvl) { return lvl == 0 ? n0 : std::max(12, n0 / 2); };  // os níveis estreitos aparecem com a janela já fina
+    // os níveis estreitos aparecem com a janela já fina (e baixa): cada nível com a metade das faixas do anterior.
+    // Eram n0/2 em todos (até 385 faixas x 7 curvas, 60-130 ms parado antes de a janela se mexer, log de 21/11/2026)
+    auto stripsOf = [&](int lvl) { return lvl == 0 ? n0 : std::max(10, n0 >> lvl); };
     for (g_levels = 0; g_levels < MAX_LEVELS; g_levels++) {
         if (!Upload(lv, lw, lh, &g_surf[g_levels])) break;
         {
@@ -386,7 +388,7 @@ bool Start(HWND h) {
     }
     SetWindowPos(g_wnd, HWND_TOPMOST, g_ovRect.left, g_ovRect.top, g_ovRect.right - g_ovRect.left, g_ovRect.bottom - g_ovRect.top, SWP_NOACTIVATE);
     const float D = DURATION;
-    const int K = 20;  // pontos por curva (Hermite entre eles: a curva continua suave)
+    const int K = 14;  // pontos por curva (Hermite entre eles: a curva continua suave; eram 20, mais tempo montando)
     int total = 0;
     for (int lvl = 0; lvl < g_levels; lvl++) {
         const int n = stripsOf(lvl);
@@ -476,7 +478,9 @@ bool Start(HWND h) {
         std::vector<float> op(K);
         for (int k = 0; k < K; k++) {
             float t = (float)k / (K - 1), pp = g_a.restore ? 1 - anim::Ease(t) : anim::Ease(t);
-            op[k] = 1 - 0.15f * Smooth(0.85f, 1.f, pp);
+            // some de vez no fim (antes ficava em 85 % e sumia num quadro: o "corte" no fim de minimizar e o salto no
+            // começo de restaurar)
+            op[k] = 1 - Smooth(0.80f, 1.f, pp);
         }
         if (IDCompositionAnimation* ao = Curve(op, D)) { g_fx->SetOpacity(ao); ao->Release(); }
     }

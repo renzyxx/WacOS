@@ -15,6 +15,7 @@
 #include <shellapi.h>
 #include <dbt.h>  // WM_DEVICECHANGE: pendrive/HD externo conectado ou tirado
 #include <dwmapi.h>
+#include <dxgi.h>  // WaitForVBlank: os quadros do vídeo no ritmo da tela
 #include <shellscalingapi.h>
 #include <algorithm>
 #include <cmath>
@@ -84,7 +85,7 @@ static float CellMinW() { return std::max(96.f, g_icon + 38); }
 static float CellH() { return g_icon + 56.5f; }
 static float LabelW() { return std::max(98.f, g_icon + 34); }
 
-enum : UINT { WM_APP_THUMB = WM_APP + 1, WM_APP_CHANGE = WM_APP + 2, WM_APP_SEARCH = WM_APP + 3, WM_APP_MEDIA = WM_APP + 4, WM_APP_WARMUP = WM_APP + 5, WM_APP_INFO = WM_APP + 6 };
+enum : UINT { WM_APP_THUMB = WM_APP + 1, WM_APP_CHANGE = WM_APP + 2, WM_APP_SEARCH = WM_APP + 3, WM_APP_MEDIA = WM_APP + 4, WM_APP_WARMUP = WM_APP + 5, WM_APP_INFO = WM_APP + 6, WM_APP_VBLANK = WM_APP + 7 };
 enum : UINT_PTR { T_SCROLL = 1, T_RELOAD = 2, T_CARET = 3, T_AUTOSCROLL = 4, T_SCROLLBAR = 5, T_SEARCH = 7, T_MEDIA = 8, T_WARMUP = 9, T_SLOWRENAME = 10, T_TAHOE = 11, T_FRENTE = 12, T_DRIVES = 13 };
 // Logo depois de abrir, quem pediu às vezes toma a frente de volta (o painel de downloads do Chrome se fecha e
 // reativa a janela dele): por 3 s, se o usuário não clicou nem apertou tecla, o Finder volta para a frente.
@@ -3661,11 +3662,54 @@ static D2D1_RECT_F QlPhotoRect(D2D1_RECT_F body, UINT iw, UINT ih, bool fill) {
     return D2D1::RectF(x, y, x + w, y + h);
 }
 
+// Quadros do vídeo no ritmo da tela: uma thread espera o retrace vertical do monitor da janela
+// (IDXGIOutput::WaitForVBlank) e avisa a janela, que pergunta ao Media Foundation se há quadro novo
+// (OnVideoStreamTick, o jeito previsto pelo modo "frame server"). Antes era um SetTimer de 15 ms: o timer do
+// Windows anda em passos de ~15,6 ms e tem a prioridade mais baixa da fila, então num vídeo de 30/60 quadros
+// alguns quadros saíam atrasados e outros dobrados (o vídeo "engasgava", em FHD e em 4K igual).
+static std::atomic<bool> g_vbRun{ false }, g_vbPending{ false };
+static std::thread g_vbThread;
+static void VBlankStop() {
+    g_vbRun = false;
+    if (g_vbThread.joinable()) g_vbThread.join();
+    g_vbPending = false;
+}
+static void VBlankStart() {
+    if (g_vbRun) return;
+    VBlankStop();
+    g_vbRun = true;
+    g_vbThread = std::thread([] {
+        IDXGIDevice* dxgi = nullptr; IDXGIAdapter* ad = nullptr; IDXGIOutput* out = nullptr;
+        HMONITOR outMon = nullptr;
+        if (IUnknown* dev = gfx::Device()) dev->QueryInterface(IID_PPV_ARGS(&dxgi));
+        if (dxgi) dxgi->GetAdapter(&ad);
+        while (g_vbRun) {
+            HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
+            if (mon != outMon || !out) {  // a janela mudou de monitor: espera o retrace do monitor novo
+                if (out) { out->Release(); out = nullptr; }
+                outMon = mon;
+                for (UINT i = 0; ad && !out; i++) {
+                    IDXGIOutput* o = nullptr;
+                    if (ad->EnumOutputs(i, &o) == DXGI_ERROR_NOT_FOUND) break;
+                    DXGI_OUTPUT_DESC d{};
+                    if (o && SUCCEEDED(o->GetDesc(&d)) && d.Monitor == mon) out = o; else if (o) o->Release();
+                }
+            }
+            if (!out || FAILED(out->WaitForVBlank())) Sleep(4);  // monitor em outra placa (híbrido): pergunta a cada 4 ms
+            if (g_vbRun && !g_vbPending.exchange(true)) PostMessageW(g_hwnd, WM_APP_VBLANK, 0, 0);
+        }
+        if (out) out->Release();
+        if (ad) ad->Release();
+        if (dxgi) dxgi->Release();
+    });
+}
+
 // Abre/fecha o player conforme o item do Quick Look (chamado antes de cada quadro).
 static void QlSyncMedia() {
     std::wstring want;
     if (g_ql) { int i = QlItem(); if (i >= 0 && IsMediaFile(g_items[i])) want = g_items[i].path; }
     if (want == g_qlMediaPath) return;
+    VBlankStop();
     media::Close();
     KillTimer(g_hwnd, T_MEDIA);
     g_qlSeekDrag = false;
@@ -3681,7 +3725,8 @@ static void QlSyncMedia() {
     }
     media::Open(want);
     g_qlMouseAt = GetTickCount();
-    SetTimer(g_hwnd, T_MEDIA, 15, nullptr);
+    SetTimer(g_hwnd, T_MEDIA, 100, nullptr);  // o tempo da música e o fim do vídeo; os quadros vêm pelo WM_APP_VBLANK
+    VBlankStart();
 }
 
 static bool QlMediaOn(const Entry& e) { return !g_qlMediaPath.empty() && g_qlMediaPath == e.path && media::Active() && !media::Failed(); }
@@ -6675,7 +6720,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case T_MEDIA: {  // quadros do vídeo; tempo da música ~5x por segundo
             static DWORD last;
             // sem player, ou o vídeo não abriu (sem codec): o timer para (antes seguia redesenhando a janela à toa)
-            if (!media::Active() || media::Failed()) { KillTimer(h, T_MEDIA); Invalidate(); break; }
+            if (!media::Active() || media::Failed()) { KillTimer(h, T_MEDIA); VBlankStop(); Invalidate(); break; }
             bool fresh = media::UpdateFrame();
             if (fresh || GetTickCount() - last > 200) { last = GetTickCount(); Render(); }
             break;
@@ -6686,6 +6731,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             Render();
             break;
         }
+        return 0;
+    case WM_APP_VBLANK:
+        g_vbPending = false;
+        if (media::Active() && !media::Failed() && media::UpdateFrame()) Render();  // quadro novo: desenha já (o Present(1) cai no retrace seguinte)
         return 0;
     case WM_APP_THUMB: {
         auto* r = (thumbs::Result*)l;
@@ -6759,6 +6808,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         DestroyWindow(h);
         return 0;
     case WM_DESTROY:
+        VBlankStop();  // a thread do retrace termina antes da janela
         shadow::Destroy();
         if (g_notifyId) SHChangeNotifyDeregister(g_notifyId);
         RevokeDragDrop(h);
