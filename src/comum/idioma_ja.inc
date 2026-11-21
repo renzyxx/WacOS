@@ -505,6 +505,7 @@
 { L"Ocultar e mostrar o Dock automaticamente", L"Dockを自動的に表示/非表示" },
 { L"Mostrar indicadores de aplicativos abertos", L"起動済みのアプリケーションにインジケータを表示" },
 { L"Arrastar janelas para as bordas da tela para organizar", L"ウインドウを画面の端にドラッグしてタイル表示" },
+{ L"Usar o encaixe do Windows (Snap)", L"Windows のスナップを使う" },
 { L"Navegador padrão", L"デフォルトのWebブラウザ" },
 { L"Mostrar todas as resoluções", L"すべての解像度を表示" },
 { L"Brilho", L"輝度" },

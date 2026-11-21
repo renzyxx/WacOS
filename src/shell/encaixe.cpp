@@ -30,11 +30,17 @@ BOOL g_winBefore = TRUE;
 std::map<HWND, RECT> g_before;  // janelas sem a DLL encaixadas por nós: o retângulo de antes
 std::map<HWND, RECT> g_tiled;   // ...e o retângulo em que ficaram
 
-bool Enabled() {
+bool WindowsSnapOn() {  // o interruptor do Windows ("Ajustar janelas")
     wchar_t v[8] = L"1"; DWORD n = sizeof(v);
     RegGetValueW(HKEY_CURRENT_USER, L"Control Panel\\Desktop", L"WindowArrangementActive", RRF_RT_REG_SZ, nullptr, v, &n);
     return v[0] != L'0';
 }
+// Ajustes > Mesa e Dock > "Usar o encaixe do Windows" (encaixe_windows=1): o encaixe fica com o Snap do Windows e o
+// nosso não age. Com o nosso, os apps de barra própria maximizados pelo Windows (Chrome, Discord, Electron, Photoshop)
+// não saíam do lugar ao arrastar a barra: quem os desmaximiza é o Snap, que o Shell desliga (e com ele desligado o
+// Windows nem começa o arrasto de uma janela maximizada).
+bool UseWindowsSnap() { return shell::Setting(L"encaixe_windows", L"0") == L"1"; }
+bool Enabled() { return WindowsSnapOn() && !UseWindowsSnap(); }
 
 // o encaixe do Windows desligado só nesta sessão (sem gravar): com ele ligado, o Windows também agia na borda
 void SilenceWindows() {
@@ -247,6 +253,11 @@ void encaixe::Start() {
         if (g_prev) apps::ours.push_back(g_prev);
     }
     if (Enabled()) SilenceWindows();
+    else if (UseWindowsSnap() && WindowsSnapOn()) {  // devolve o do Windows (pode ter ficado desligado de uma sessão fechada à força)
+        BOOL cur = TRUE; SystemParametersInfoW(SPI_GETWINARRANGING, 0, &cur, 0);
+        if (!cur) SystemParametersInfoW(SPI_SETWINARRANGING, TRUE, nullptr, 0);
+        Log(L"encaixe: o do Windows (encaixe_windows=1)");
+    }
     if (!g_ev) g_ev = SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, nullptr, OnEvent, 0, 0, WINEVENT_OUTOFCONTEXT | shell::SemProprio());
     Log(L"encaixe: ligado (encaixe do Windows %ls nesta sessão)", g_turnedOff ? L"desligado" : L"já estava desligado");
 }

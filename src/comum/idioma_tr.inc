@@ -505,6 +505,7 @@
 { L"Ocultar e mostrar o Dock automaticamente", L"Dock’u otomatik olarak gizle ve göster" },
 { L"Mostrar indicadores de aplicativos abertos", L"Açık uygulamaların göstergelerini göster" },
 { L"Arrastar janelas para as bordas da tela para organizar", L"Döşemek için pencereleri ekran kenarlarına sürükle" },
+{ L"Usar o encaixe do Windows (Snap)", L"Windows Ek Yerleştirme (Snap) kullan" },
 { L"Navegador padrão", L"Varsayılan web tarayıcısı" },
 { L"Mostrar todas as resoluções", L"Tüm çözünürlükleri göster" },
 { L"Brilho", L"Parlaklık" },

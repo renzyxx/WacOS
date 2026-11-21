@@ -1629,7 +1629,16 @@ Page MesaDock() {
     p.groups.push_back(G({ icons, persMesa, Popup(L"Clicar no papel de parede para mostrar a mesa", { L"Sempre", L"Só no Organizador Visual", L"Nunca" },
                                  [] { std::wstring v = Setting(L"clique_mostra_mesa", L"palco"); return v == L"1" ? 0 : v == L"0" ? 2 : 1; },
                                  [](int i) { SetSetting(L"clique_mostra_mesa", i == 0 ? L"1" : i == 2 ? L"0" : L"palco"); }) }, L"Área de Trabalho"));
-    p.groups.push_back(G({ Toggle(L"Arrastar janelas para as bordas da tela para organizar", [] { return sys::SnapEnabled(); }, [](bool on) { sys::SetSnapEnabled(on); }),
+    p.groups.push_back(G({ Toggle(L"Arrastar janelas para as bordas da tela para organizar", [] { return sys::SnapEnabled(); },
+                                  [](bool on) { sys::SetSnapEnabled(on); if (on && Setting(L"encaixe_windows", L"0") == L"1") SystemParametersInfoW(0x0083, TRUE, nullptr, 0); }),
+                           // o Snap do Windows no lugar do nosso: arrastar um app maximizado (Chrome, Discord) o desmaximiza
+                           Toggle(L"Usar o encaixe do Windows (Snap)", [] { return Setting(L"encaixe_windows", L"0") == L"1"; },
+                                  [](bool v) {
+                                      SetSetting(L"encaixe_windows", v ? L"1" : L"0");
+                                      // na hora, sem reiniciar o Shell (0x0083 = SPI_SETWINARRANGING, só nesta sessão)
+                                      if (v && sys::SnapEnabled()) SystemParametersInfoW(0x0083, TRUE, nullptr, 0);
+                                      else if (!v && FindWindowW(L"ShellMensagens", nullptr)) SystemParametersInfoW(0x0083, FALSE, nullptr, 0);
+                                  }),
                            // issue #4: como no Mac, o Finder fica no Alt+Tab mesmo sem janela; desligado, só com janela aberta
                            Toggle(L"Mostrar o Finder no Alt+Tab mesmo sem janelas", [] { return Setting(L"seletor_finder", L"1") != L"0"; },
                                   [](bool v) { SetSetting(L"seletor_finder", v ? L"1" : L"0"); }),

@@ -505,6 +505,7 @@
 { L"Ocultar e mostrar o Dock automaticamente", L"자동으로 Dock 가리기와 보기" },
 { L"Mostrar indicadores de aplicativos abertos", L"열려 있는 응용 프로그램에 표시등 보기" },
 { L"Arrastar janelas para as bordas da tela para organizar", L"윈도우를 화면 가장자리로 드래그하여 타일로 정렬" },
+{ L"Usar o encaixe do Windows (Snap)", L"Windows 스냅 사용" },
 { L"Navegador padrão", L"기본 웹 브라우저" },
 { L"Mostrar todas as resoluções", L"모든 해상도 보기" },
 { L"Brilho", L"밝기" },

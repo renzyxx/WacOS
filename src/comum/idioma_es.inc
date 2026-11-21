@@ -505,6 +505,7 @@
 { L"Ocultar e mostrar o Dock automaticamente", L"Ocultar y mostrar el Dock automáticamente" },
 { L"Mostrar indicadores de aplicativos abertos", L"Mostrar indicadores de las aplicaciones abiertas" },
 { L"Arrastar janelas para as bordas da tela para organizar", L"Arrastrar ventanas a los bordes de la pantalla para organizarlas" },
+{ L"Usar o encaixe do Windows (Snap)", L"Usar el ajuste de Windows (Snap)" },
 { L"Navegador padrão", L"Navegador web por omisión" },
 { L"Mostrar todas as resoluções", L"Mostrar todas las resoluciones" },
 { L"Brilho", L"Brillo" },

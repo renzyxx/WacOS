@@ -505,6 +505,7 @@
 { L"Ocultar e mostrar o Dock automaticamente", L"Dock automatisch ein- und ausblenden" },
 { L"Mostrar indicadores de aplicativos abertos", L"Anzeige für geöffnete Programme einblenden" },
 { L"Arrastar janelas para as bordas da tela para organizar", L"Fenster an den Bildschirmrand ziehen, um sie anzuordnen" },
+{ L"Usar o encaixe do Windows (Snap)", L"Windows-Andocken (Snap) verwenden" },
 { L"Navegador padrão", L"Standard-Webbrowser" },
 { L"Mostrar todas as resoluções", L"Alle Auflösungen anzeigen" },
 { L"Brilho", L"Helligkeit" },

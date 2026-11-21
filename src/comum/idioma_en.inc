@@ -514,6 +514,7 @@
 { L"Ocultar e mostrar o Dock automaticamente", L"Automatically hide and show the Dock" },
 { L"Mostrar indicadores de aplicativos abertos", L"Show indicators for open applications" },
 { L"Arrastar janelas para as bordas da tela para organizar", L"Drag windows to screen edges to tile" },
+{ L"Usar o encaixe do Windows (Snap)", L"Use Windows Snap" },
 { L"Navegador padrão", L"Default web browser" },
 { L"Mostrar todas as resoluções", L"Show all resolutions" },
 { L"Brilho", L"Brightness" },

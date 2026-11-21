@@ -505,6 +505,7 @@
 { L"Ocultar e mostrar o Dock automaticamente", L"自动隐藏和显示程序坞" },
 { L"Mostrar indicadores de aplicativos abertos", L"为打开的应用程序显示指示灯" },
 { L"Arrastar janelas para as bordas da tela para organizar", L"将窗口拖到屏幕边缘以平铺" },
+{ L"Usar o encaixe do Windows (Snap)", L"使用 Windows 贴靠" },
 { L"Navegador padrão", L"默认网页浏览器" },
 { L"Mostrar todas as resoluções", L"显示所有分辨率" },
 { L"Brilho", L"亮度" },
