@@ -1102,7 +1102,20 @@ void KeepAbove(Info* in);  // mais abaixo
 void UpdateCorners(Info* in, RECT vis) {
     HWND h = in->owner;
     // GTK: a moldura é quem pinta as bordas; escondida no arraste, os lados ficavam transparentes enquanto a janela andava
-    if (!in->rgn.cx || (in->moving && !(!in->custom && PintaBarraNaFaixa(h))) || !IsWindowVisible(h) || IsIconic(h) || IsZoomed(h) || Fullscreen(h)) { HideCorners(in); return; }
+    if (!in->rgn.cx || !IsWindowVisible(h) || IsIconic(h) || IsZoomed(h) || Fullscreen(h)) { HideCorners(in); return; }
+    // Arrastando (issue #103): a moldura não some mais; ela anda junto. Só o lugar muda (o conteúdo é o mesmo),
+    // então basta mover a janela dela; o desenho é refeito no fim, no WM_EXITSIZEMOVE. Redimensionando (tamanho
+    // novo), continua escondida até o fim, como antes: o desenho seria do tamanho velho.
+    if (in->moving && (in->custom || !PintaBarraNaFaixa(h))) {
+        HWND fw0 = in->corner[0];
+        if (fw0 && IsWindowVisible(fw0)) {
+            RECT cur{}; GetWindowRect(fw0, &cur);
+            if (cur.right - cur.left == vis.right - vis.left + 2 && cur.bottom - cur.top == vis.bottom - vis.top + 2)  // M = 1: a margem do contorno de fora
+                SetWindowPos(fw0, nullptr, vis.left - 1, vis.top - 1, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            else HideCorners(in);
+        }
+        return;
+    }
     int r = CornerRadius(h), S = (int)std::ceil(SqExt((float)r, (vis.right - vis.left) / 2.f, (vis.bottom - vis.top) / 2.f)) + 2;
     // cor embaixo: só lê da tela quando o ponto é mesmo desta janela (não coberto por outra)
     // GTK (GIMP 3, Deluge) e quem desenha pela placa de vídeo: as bordas da moldura (lados e embaixo) que o PaintNC pinta
@@ -2556,7 +2569,8 @@ LRESULT CALLBACK OwnerProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR, DWORD_P
     case WM_ENTERSIZEMOVE:
         in->moving = true;
         GetWindowRect(h, &in->moveStart);
-        if (in->custom || !PintaBarraNaFaixa(h)) HideCorners(in);  // a moldura atrasaria um quadro atrás da janela (a "linha" que a seguia); volta no fim
+        // a moldura não é mais escondida aqui: ela acompanha o arraste (UpdateCorners, issue #103); num
+        // redimensionamento ela se esconde no primeiro passo e volta no fim, como antes
         PatchWobble();
         break;
     case WM_MOVING: {
