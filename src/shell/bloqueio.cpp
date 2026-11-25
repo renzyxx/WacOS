@@ -214,22 +214,23 @@ void DrawAt(ID2D1DeviceContext* dc, IDWriteTextLayout* l, float cx, float base, 
     dc->DrawTextLayout({ cx - l->GetMaxWidth() / 2, base - b }, l, br, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
 }
 
-bool TahoeLock();
-std::wstring DateText() {
-    SYSTEMTIME st; GetLocalTime(&st);
-    wchar_t d[128] = {};
-    if (TahoeLock()) {  // macOS 26: data abreviada ("Thu Jun 19" / "qua. 11 de nov.")
-        GetDateFormatEx(idioma::Locale(), 0, &st, idioma::DatePattern(idioma::D_WEEKDAY_SHORT), d, 128, nullptr);
-        return idioma::Cap(d);
+IDWriteTextLayout* ClockLayout(const std::wstring& text, float size, DWRITE_FONT_WEIGHT weight, float width) {
+    auto* layout = Lay(text, L"SF Pro Display", size, weight, width);
+    if (!layout) return nullptr;
+
+    DWRITE_TEXT_METRICS metrics{};
+    if (SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.width > width) {
+        layout->Release();
+        layout = Lay(text, L"SF Pro Display", size * width / metrics.width, weight, width);
     }
-    GetDateFormatEx(idioma::Locale(), 0, &st, idioma::DatePattern(idioma::D_WEEKDAY_LONG), d, 128, nullptr);  // "sexta-feira, 20 de novembro"
-    return d;
+    return layout;
 }
-std::wstring TimeText() {
-    SYSTEMTIME st; GetLocalTime(&st);
-    std::wstring hora = shell::Hora(st, false, false);  // 12 ou 24 horas (issue #43); o relógio grande sem AM/PM, como no Mac
-    const wchar_t* t = hora.c_str();
-    return t;
+
+std::wstring DateText(const SYSTEMTIME& st, bool shortDate) {
+    wchar_t date[128] = {};
+    auto pattern = shortDate ? idioma::D_WEEKDAY_SHORT : idioma::D_WEEKDAY_LONG;
+    GetDateFormatEx(idioma::Locale(), 0, &st, idioma::DatePattern(pattern), date, 128, nullptr);
+    return shortDate ? idioma::Cap(date) : std::wstring(date);
 }
 
 std::wstring InputName() {  // fonte de entrada, como o Mac mostra no canto
@@ -407,31 +408,53 @@ void Draw(ID2D1DeviceContext* dc, Mon& m, float W, float H, double now) {
 
     ID2D1SolidColorBrush* br = nullptr;
     dc->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &br);
+    if (!br) return;
     ID2D1BitmapBrush1* vib = nullptr;
     if (m.vib) dc->CreateBitmapBrush(m.vib, D2D1::BitmapBrushProperties1(), D2D1::BrushProperties(), &vib);
 
-    // data e relógio, com a tinta do papel de parede
-    D2D1::Matrix3x2F M = D2D1::Matrix3x2F::Scale(topSc, topSc, { W / 2, 200 }) * D2D1::Matrix3x2F::Translation(0, topDy);
-    D2D1::Matrix3x2F inv = M; inv.Invert();
-    dc->SetTransform(M);
-    ID2D1Brush* ink = vib ? (ID2D1Brush*)vib : (ID2D1Brush*)br;
-    if (vib) vib->SetTransform(inv);
-    if (TahoeLock()) {  // macOS 26: data menor e branca; relógio fino de vidro (medidas do vídeo, 1080p)
-        br->SetColor(D2D1::ColorF(1, 1, 1, 0.92f * topA));
-        if (auto* l = Lay(DateText(), L"SF Pro Display", 25, DWRITE_FONT_WEIGHT_SEMI_BOLD, W)) { DrawAt(dc, l, W / 2, 122, br); l->Release(); }
-        if (auto* l = Lay(TimeText(), L"SF Pro Display", 124, DWRITE_FONT_WEIGHT_NORMAL, W)) { GlassText(dc, l, W / 2, 238, vib, topA); l->Release(); }
-    } else {
-    if (auto* l = Lay(DateText(), L"SF Pro Display", 28, DWRITE_FONT_WEIGHT_SEMI_BOLD, W)) {
-        ink->SetOpacity(0.92f * topA); if (!vib) br->SetColor(D2D1::ColorF(1, 1, 1, 0.75f * topA));
-        DrawAt(dc, l, W / 2, 125, ink); l->Release();
+    // Reserva espaço para a conta em telas baixas ou com escala alta.
+    const float clockScale = std::clamp((H - 200.f) / 300.f, 0.25f, 1.2f);
+    const float clockWidth = std::max(1.f, W - 48.f);
+    const float clockTop = std::max(34.f, H * 0.075f);
+    const float dateBase = clockTop + 38.f * clockScale;
+    const float timeBase = clockTop + 154.f * clockScale;
+    const float center = W / 2;
+    const bool glass = TahoeLock();
+    D2D1::Matrix3x2F transform =
+        D2D1::Matrix3x2F::Scale(topSc, topSc, { center, clockTop }) *
+        D2D1::Matrix3x2F::Translation(0, topDy);
+    dc->SetTransform(transform);
+    if (vib) {
+        auto inverse = transform;
+        inverse.Invert();
+        vib->SetTransform(inverse);
     }
-    if (auto* l = Lay(TimeText(), L"SF Pro Display", 133, DWRITE_FONT_WEIGHT_SEMI_BOLD, W)) {
-        ink->SetOpacity(0.97f * topA); if (!vib) br->SetColor(D2D1::ColorF(1, 1, 1, 0.80f * topA));
-        DrawAt(dc, l, W / 2, 248, ink); l->Release();
+
+    SYSTEMTIME localTime{};
+    GetLocalTime(&localTime);
+    if (auto* date = ClockLayout(DateText(localTime, glass), 25 * clockScale,
+                                 DWRITE_FONT_WEIGHT_SEMI_BOLD, clockWidth)) {
+        br->SetColor(D2D1::ColorF(0, 0, 0, 0.55f * topA));
+        DrawAt(dc, date, center, dateBase + 1, br);
+        br->SetColor(D2D1::ColorF(1, 1, 1, 0.96f * topA));
+        DrawAt(dc, date, center, dateBase, br);
+        date->Release();
     }
+    const auto time = shell::Hora(localTime, false, false);
+    if (auto* clock = ClockLayout(time, 124 * clockScale,
+                                  glass ? DWRITE_FONT_WEIGHT_NORMAL : DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                                  clockWidth)) {
+        if (glass) {
+            GlassText(dc, clock, center, timeBase, vib, topA);
+        } else {
+            br->SetColor(D2D1::ColorF(0, 0, 0, 0.50f * topA));
+            DrawAt(dc, clock, center, timeBase + 2, br);
+            br->SetColor(D2D1::ColorF(1, 1, 1, 0.95f * topA));
+            DrawAt(dc, clock, center, timeBase, br);
+        }
+        clock->Release();
     }
     dc->SetTransform(D2D1::Matrix3x2F::Identity());
-    br->SetOpacity(1);
 
     // canto de cima: fonte de entrada, bateria (se houver), energia
     {
