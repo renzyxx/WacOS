@@ -59,6 +59,7 @@ IDWriteTextFormat *g_tfDesk, *g_tfTitle, *g_tfPlus;
 // Arrastar uma janela até uma Mesa da faixa de cima leva a janela para lá (como no Mac). A janela segue o
 // ponteiro e encolhe chegando perto da faixa; solta na Mesa, ela voa até a miniatura e some dali.
 int g_drag = -1;            // janela pressionada
+bool g_lDown;               // o botão esquerdo desceu nesta janela (um "subir" vindo de fora não é clique, issue #99)
 bool g_dragging;            // já mexeu (senão é um clique)
 D2D1_POINT_2F g_dragStart{}, g_dragGrab{};  // onde apertou; ponto da janela sob o ponteiro (0..1)
 D2D1_RECT_F g_dragBase{};   // tamanho da janela quando começou a arrastar (px)
@@ -894,6 +895,7 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_LBUTTONDOWN: {
         if (g_closing || g_compAnim) return 0;
+        g_lDown = true;
         D2D1_POINT_2F p = Px(l);
         g_drag = HitWindow(p); g_dragging = false;
         if (g_drag >= 0) {
@@ -953,6 +955,10 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_LBUTTONUP: {
         if (g_closing) return 0;
+        // o botão desceu em outra janela (ex.: o clique na Central de Controle que abriu o Mission Control): sem este
+        // filtro, o "subir" caía aqui e fechava na hora — só funcionava segurando o clique (issue #99)
+        if (!g_lDown) return 0;
+        g_lDown = false;
         D2D1_POINT_2F p = Px(l);
         float sc = Sc();
         if (GetCapture() == h) ReleaseCapture();
@@ -1138,7 +1144,7 @@ void missioncontrol::Toggle() {
     for (auto& w : g_wins) w.from = FrameF(w);
     g_barFrom = g_barTo = 0;
     Layout(0);
-    g_open = true; g_closing = false; g_hover = -1; g_pick = nullptr; g_hoverDesk = -1; g_hoverX = false;
+    g_open = true; g_closing = false; g_hover = -1; g_pick = nullptr; g_hoverDesk = -1; g_hoverX = false; g_lDown = false;
     g_animAt = g_openAt = anim::Now();
     g_durMs = liquid::On() ? 300.f : std::min(550.f, anim::SpringDuration(RESPONSE, DAMPING) * 1000);
     g_compAnim = false;
