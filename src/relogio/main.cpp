@@ -20,6 +20,7 @@ namespace {
 float TB = 56;  // macOS 27: 52 (barra unificada)
 const UINT WM_FIELDLOST = WM_APP + 77, WM_CITYFOUND = WM_APP + 8;
 int g_tab = 0;  // 0 mundial, 1 alarmes, 2 cronômetro, 3 timer
+UINT g_msgAba = 0;  // outra instância pedindo uma aba (a Central de Controle abre o Relógio na aba do controle)
 IDWriteTextFormat *g_tfSeg, *g_tfBig, *g_tfBigR, *g_tfHuge, *g_tfRow, *g_tfSub, *g_tfBtn, *g_tfIcon, *g_tfMono;
 
 // ---- relógio mundial (fusos do Windows por cidade)
@@ -618,6 +619,10 @@ void AlarmMenu(int k, POINT scr) {
 }
 
 LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == g_msgAba && g_msgAba) {  // outra instância pediu uma aba (issue #99)
+        if (w <= 3) { g_tab = (int)w; InvalidateRect(h, nullptr, FALSE); }
+        return 0;
+    }
     switch (m) {
     case WM_PAINT: { PAINTSTRUCT ps; ::BeginPaint(h, &ps); Paint(); ::EndPaint(h, &ps); return 0; }
     case WM_ERASEBKGND: return 1;
@@ -681,10 +686,31 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
 
 }  // namespace
 
-int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
+int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR cmd, int show) {
+    // a aba pode vir na linha de comando, por nome: alarme, cronometro ou temporizador (issue #99)
+    int aba = 0;
+    if (cmd) {
+        std::wstring a = cmd;
+        for (auto& c : a) c = (wchar_t)towlower(c);
+        auto tem = [&](const wchar_t* s) { return a.find(s) != std::wstring::npos; };
+        if (tem(L"alarme")) aba = 1;
+        else if (tem(L"cronometro") || tem(L"cronômetro")) aba = 2;
+        else if (tem(L"temporizador") || tem(L"timer")) aba = 3;
+    }
+    g_msgAba = RegisterWindowMessageW(L"WacOSRelogioAba");
+    HANDLE one = CreateMutexW(nullptr, TRUE, L"WacOSRelogioUmaJanela");  // uma janela só, como no Mac (e na Calculadora)
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {  // já aberto: troca para a aba pedida e traz para a frente
+        if (HWND w = FindWindowW(L"RelogioJanela", nullptr)) {
+            PostMessageW(w, g_msgAba, aba, 0);
+            if (IsIconic(w)) ShowWindow(w, SW_RESTORE);
+            SetForegroundWindow(w);
+        }
+        return 0;
+    }
     if (!Init()) return 1;
     g_file = DataPath(L"relogio.txt");
     Load();
+    g_tab = aba;
     std::wstring disp = HasFont(L"SF Pro Display") ? L"SF Pro Display" : family;
     g_tfSeg = Fmt(12.5f, DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_TEXT_ALIGNMENT_CENTER);
     g_tfBig = Fmt(44, DWRITE_FONT_WEIGHT_LIGHT, DWRITE_TEXT_ALIGNMENT_TRAILING, false, disp.c_str());
