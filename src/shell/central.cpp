@@ -33,6 +33,7 @@
 #include "../comum/idioma.h"
 #include "../comum/nomes.h"
 #include <array>
+#include <map>
 #include <intrin.h>
 #include "../comum/vidro.h"
 #include <bluetoothapis.h>
@@ -59,7 +60,7 @@ ui::GpuSurface g_s;
 bool g_open, g_glass, g_menu;
 double g_openAt;   // ms de anim::Now
 DWORD g_closedAt;
-IDWriteTextFormat *g_tfBold, *g_tfSmall, *g_tfTile, *g_tfGlyph;
+IDWriteTextFormat *g_tfBold, *g_tfSmall, *g_tfTile;
 
 // ---- estado (lido em threads; a janela só desenha)
 std::mutex g_mx;
@@ -755,10 +756,20 @@ void Sym(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const wchar_t* name, 
         return;
     }
     if (simbolo::Draw(dc, name, r, br)) return;
-    float s = std::max(r.right - r.left, r.bottom - r.top) + 6;
+    // sem o SVG: o glifo da Segoe Fluent no tamanho do quadro. Antes era um formato fixo de 14 pt: os controles sem
+    // SVG (Alarme, Cronômetro, Terminal...) ficavam miúdos perto dos vizinhos com SVG (issue #99). Um formato por
+    // tamanho, em cache (a Central redesenha bastante).
+    float s = std::max(r.right - r.left, r.bottom - r.top);
+    static std::map<int, IDWriteTextFormat*> fmts;
+    IDWriteTextFormat*& tf = fmts[(int)std::lround(s * 2)];  // meio ponto de resolução basta
+    if (!tf && (tf = ui::Format(s, DWRITE_FONT_WEIGHT_NORMAL, true, DWRITE_TEXT_ALIGNMENT_CENTER))) {
+        tf->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        tf->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    }
+    if (!tf) return;
     float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
     wchar_t g = fallback;
-    dc->DrawTextW(&g, 1, g_tfGlyph, D2D1::RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2), br);
+    dc->DrawTextW(&g, 1, tf, D2D1::RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2), br);
 }
 
 float PanelR() { return liquid::On() ? 26.f : liquid::Leopard() ? 6.f : RADIUS; }  // Tahoe: painel bem mais redondo; Leopard: o canto do menu
@@ -840,7 +851,7 @@ void Circle(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Pal& p, D2D1
     else if (liquid::On()) {  // Tahoe ligado: círculo branco com o símbolo na cor do controle
         br->SetColor(D2D1::ColorF(1, 1, 1, 0.97f));
         dc->FillEllipse(D2D1::Ellipse(c, r, r), br);
-        float s = r * 0.62f;
+        float s = r * 0.45f;  // o glifo ocupa ~45% do raio, como no Mac (era 0,62: grande demais, issue #99)
         Sym(dc, br, sym, fb, D2D1::RectF(c.x - s, c.y - s, c.x + s, c.y + s), onColor);
         return;
     } else {
@@ -848,7 +859,7 @@ void Circle(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Pal& p, D2D1
         dc->FillEllipse(D2D1::Ellipse(c, r, r), br);
         if (liquid::On()) liquid::Rim(dc, D2D1::RectF(c.x - r, c.y - r, c.x + r, c.y + r), r, ui::Dark(), 0.6f);
     }
-    float s = r * 0.62f;
+    float s = r * 0.45f;  // idem (Sequoia e os círculos apagados do Tahoe)
     Sym(dc, br, sym, fb, D2D1::RectF(c.x - s, c.y - s, c.x + s, c.y + s), on ? D2D1::ColorF(1, 1, 1, 1) : p.offGlyph);
 }
 
@@ -1949,7 +1960,11 @@ void RunExtra(const std::wstring& id) {  // controle da galeria clicado (fora da
     else if (id == L"spotlight") spotlight::Toggle();
     else if (id == L"lupa") open(L"magnify.exe");
     else if (id == L"teclado") open(L"osk.exe");
-    else if (id == L"alarme" || id == L"cronometro" || id == L"temporizador") open(L"ms-clock:");
+    else if (id == L"alarme" || id == L"cronometro" || id == L"temporizador") {  // o Relógio do WacOS, na aba do controle (issue #99)
+        std::wstring exe = shell::dir + L"\\" EXE_CLOCK;
+        if (GetFileAttributesW(exe.c_str()) != INVALID_FILE_ATTRIBUTES) open(exe, id.c_str());
+        else open(L"ms-clock:");  // instalação antiga, sem o Relógio
+    }
     else if (id == L"luznoturna") open(L"ms-settings:nightlight");
     else if (id == L"bateria") open(L"ms-settings:batterysaver");
 }
@@ -2266,8 +2281,7 @@ bool central::Create(HINSTANCE hi) {
     g_tfBold = ui::Format(13, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     g_tfSmall = ui::Format(11, DWRITE_FONT_WEIGHT_NORMAL);
     g_tfTile = ui::Format(11, DWRITE_FONT_WEIGHT_MEDIUM, false, DWRITE_TEXT_ALIGNMENT_CENTER);
-    g_tfGlyph = ui::Format(14, DWRITE_FONT_WEIGHT_NORMAL, true, DWRITE_TEXT_ALIGNMENT_CENTER);
-    for (auto* tf : { g_tfBold, g_tfSmall, g_tfGlyph }) if (tf) { tf->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER); tf->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP); }
+    for (auto* tf : { g_tfBold, g_tfSmall }) if (tf) { tf->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER); tf->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP); }
     if (g_tfTile) g_tfTile->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     DWRITE_TRIMMING tr{ DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
     for (auto* tf : { g_tfBold, g_tfSmall }) if (tf) {  // texto que não cabe termina em "…" (como no Mac), não cortado no meio
