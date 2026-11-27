@@ -16,9 +16,13 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Devices.Radios.h>
+#include <winrt/Windows.Devices.Bluetooth.h>
+#include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
+#include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <algorithm>
@@ -1139,9 +1143,17 @@ int g_detail = D_NONE;
 double g_detailAt;
 D2D1_RECT_F g_detailFrom{};
 std::vector<std::wstring> g_nets;                 // Wi-Fi: outras redes, da mais forte para a mais fraca (g_mx)
-std::vector<std::pair<std::wstring, bool>> g_bts;  // Bluetooth: (nome, conectado) (g_mx)
+struct BtDevice {
+    ULONGLONG address;
+    std::wstring name;
+    bool connected;
+    int battery = -1;
+};
+std::vector<BtDevice> g_bts;  // g_mx
+std::atomic<bool> g_btLoading{ false };
+ULONGLONG g_btReadAt;  // thread da interface
 std::vector<Out> g_detOuts;                       // Som: as saídas
-bool g_detLoading;
+std::atomic<bool> g_detLoading{ false };
 const wchar_t* FOCO_MODOS[4] = { L"Não Perturbe", L"Trabalho", L"Sono", L"Reduzir Interrupções" };
 const float DET_TOP = 44, DET_ROW = 32, DET_SEP = 11, DET_LINK = 22, DET_HEAD = 16;
 
@@ -1159,8 +1171,98 @@ float DetailH() {
     return h + DET_SEP + DET_LINK + 10;
 }
 
+int ReadBtBattery(const winrt::Windows::Devices::Bluetooth::BluetoothLEDevice& device) {
+    using namespace winrt::Windows::Devices::Bluetooth;
+    using namespace GenericAttributeProfile;
+    using winrt::Windows::Storage::Streams::DataReader;
+
+    auto services = device.GetGattServicesForUuidAsync(GattServiceUuids::Battery(), BluetoothCacheMode::Cached).get();
+    if (services.Status() != GattCommunicationStatus::Success) return -1;
+    for (auto const& service : services.Services()) {
+        auto chars = service.GetCharacteristicsForUuidAsync(GattCharacteristicUuids::BatteryLevel(), BluetoothCacheMode::Cached).get();
+        if (chars.Status() != GattCommunicationStatus::Success) continue;
+        for (auto const& characteristic : chars.Characteristics()) {
+            auto read = characteristic.ReadValueAsync(BluetoothCacheMode::Uncached);
+            if (read.wait_for(std::chrono::seconds(2)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+                read.Cancel();
+                continue;
+            }
+            auto value = read.GetResults();
+            if (value.Status() != GattCommunicationStatus::Success || value.Value().Length() != 1) continue;
+            int level = DataReader::FromBuffer(value.Value()).ReadByte();
+            if (level <= 100) return level;
+        }
+    }
+    return -1;
+}
+
+void AddBluetoothDevices(std::vector<BtDevice>& devices) {
+    using namespace winrt::Windows::Devices::Bluetooth;
+    using namespace winrt::Windows::Devices::Enumeration;
+    try {
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    } catch (winrt::hresult_error const&) {
+        return;
+    }
+    constexpr wchar_t batteryKey[] = L"System.Devices.BatteryLife";
+    try {
+        auto selector = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected);
+        for (auto const& info : DeviceInformation::FindAllAsync(selector, { winrt::hstring(batteryKey) }, DeviceInformationKind::AssociationEndpoint).get()) {
+            int level = winrt::unbox_value_or<uint8_t>(info.Properties().TryLookup(batteryKey), 255);
+            if (level > 100) continue;
+            try {
+                auto device = BluetoothDevice::FromIdAsync(info.Id()).get();
+                if (!device || device.ConnectionStatus() != BluetoothConnectionStatus::Connected) continue;
+                for (auto& entry : devices) if (entry.address == device.BluetoothAddress()) {
+                    entry.connected = true;
+                    entry.battery = level;
+                    break;
+                }
+            } catch (winrt::hresult_error const&) {
+                // Pode ter desconectado depois da enumeração.
+            }
+        }
+    } catch (winrt::hresult_error const&) {
+        // Continua com o Bluetooth LE.
+    }
+    try {
+        auto selector = BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected);
+        for (auto const& info : DeviceInformation::FindAllAsync(selector, { winrt::hstring(batteryKey) }, DeviceInformationKind::AssociationEndpoint).get()) {
+            try {
+                auto device = BluetoothLEDevice::FromIdAsync(info.Id()).get();
+                if (!device || device.ConnectionStatus() != BluetoothConnectionStatus::Connected) continue;
+                auto address = device.BluetoothAddress();
+                auto found = std::find_if(devices.begin(), devices.end(), [address](auto const& existing) {
+                    return existing.address == address;
+                });
+                if (found == devices.end()) {
+                    auto name = info.Name();
+                    if (name.empty()) continue;
+                    devices.push_back({ address, std::wstring(name.c_str()), true });
+                    found = devices.end() - 1;
+                }
+                found->connected = true;
+                if (found->battery < 0) {
+                    int level = winrt::unbox_value_or<uint8_t>(info.Properties().TryLookup(batteryKey), 255);
+                    found->battery = level <= 100 ? level : ReadBtBattery(device);
+                }
+            } catch (winrt::hresult_error const&) {
+                // O dispositivo pode desconectar enquanto a lista está sendo lida.
+            }
+        }
+    } catch (winrt::hresult_error const&) {
+        // Mantém a lista do Win32 quando a enumeração BLE não está disponível.
+    }
+    winrt::uninit_apartment();
+}
+
 void LoadDetail(int kind) {
-    g_detLoading = true;
+    if (kind == D_BT) {
+        if (g_btLoading.exchange(true)) return;
+        g_btReadAt = GetTickCount64();
+    } else {
+        g_detLoading = true;
+    }
     std::thread([kind] {
         if (kind == D_WIFI) {
             std::vector<std::pair<std::wstring, ULONG>> v;
@@ -1191,22 +1293,24 @@ void LoadDetail(int kind) {
             g_nets.clear();
             for (auto& e : v) if (e.first != g_st.ssid) g_nets.push_back(e.first);
         } else if (kind == D_BT) {
-            std::vector<std::pair<std::wstring, bool>> r;
+            std::vector<BtDevice> r;
             BLUETOOTH_DEVICE_SEARCH_PARAMS sp{ sizeof(sp) };
             sp.fReturnAuthenticated = TRUE; sp.fReturnRemembered = TRUE; sp.fReturnConnected = TRUE;
             BLUETOOTH_DEVICE_INFO di{ sizeof(di) };
             if (HBLUETOOTH_DEVICE_FIND f = BluetoothFindFirstDevice(&sp, &di)) {
                 do {
-                    if (di.fRemembered || di.fAuthenticated) r.push_back({ di.szName, di.fConnected != FALSE });
+                    if (di.fRemembered || di.fAuthenticated) r.push_back({ di.Address.ullLong, di.szName, di.fConnected != FALSE });
                     di.dwSize = sizeof(di);
                 } while (BluetoothFindNextDevice(f, &di));
                 BluetoothFindDeviceClose(f);
             }
-            std::stable_sort(r.begin(), r.end(), [](auto& a, auto& b) { return a.second > b.second; });
+            AddBluetoothDevices(r);
+            std::stable_sort(r.begin(), r.end(), [](auto& a, auto& b) { return a.connected > b.connected; });
             std::lock_guard<std::mutex> l(g_mx);
-            g_bts = r;
+            g_bts = std::move(r);
         }
-        g_detLoading = false;
+        if (kind == D_BT) g_btLoading = false;
+        else g_detLoading = false;
         if (g_wnd) PostMessageW(g_wnd, WM_CC_UPDATE, 1, 0);
     }).detach();
 }
@@ -1474,7 +1578,7 @@ void PaintTahoe() {
             Text(dc, br, link, D2D1::RectF(L, y, R, y + DET_LINK), g_tfTile, white);
             g_hits.push_back({ H_DET_SET, D2D1::RectF(full.left + 4, y, full.right - 4, y + DET_LINK) });
         };
-        std::vector<std::wstring> nets; std::vector<std::pair<std::wstring, bool>> bts;
+        std::vector<std::wstring> nets; std::vector<BtDevice> bts;
         { std::lock_guard<std::mutex> l(g_mx); nets = g_nets; bts = g_bts; }
         // a faixa de volume / brilho (o mesmo trilho dos blocos: #E8E8E8 / #232323 e a parte cheia branca)
         auto slider = [&](HitId track, float v, const wchar_t* sl, wchar_t fl, const wchar_t* sr, wchar_t fr) {
@@ -1503,8 +1607,14 @@ void PaintTahoe() {
         case D_BT:
             sw(st.radio[1] == 1);
             head(Tr(L"Dispositivos"));
-            if (bts.empty()) { Text(dc, br, g_detLoading ? Tr(L"Procurando…") : Tr(L"Nenhum dispositivo"), D2D1::RectF(L, y, R, y + DET_ROW), g_tfTile, white2); y += DET_ROW; }
-            for (size_t i = 0; i < bts.size() && i < 6; i++) row(bts[i].first, L"headphones", 0xE702, bts[i].second, blue, (int)i);
+            if (bts.empty()) { Text(dc, br, g_btLoading ? Tr(L"Procurando…") : Tr(L"Nenhum dispositivo"), D2D1::RectF(L, y, R, y + DET_ROW), g_tfTile, white2); y += DET_ROW; }
+            for (size_t i = 0; i < bts.size() && i < 6; i++) {
+                const auto& device = bts[i];
+                std::wstring label = device.name;
+                if (st.radio[1] == 1 && device.connected && device.battery >= 0)
+                    label = std::to_wstring(device.battery) + L"%  " + label;
+                row(label, L"headphones", 0xE702, device.connected && st.radio[1] == 1, blue, (int)i);
+            }
             tail(Tr(L"Ajustes de Bluetooth…"));
             break;
         case D_FOCO: {
@@ -2193,7 +2303,10 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_CC_UPDATE: if (w == 1 && g_detail >= 0) Place(); Paint(); return 0;  // w 1: a lista do módulo expandido chegou
     case veil::WM_VEIL_CLICK: Close(); return 0;
     case WM_TIMER:
-        if (w == T_POLL && g_open && g_drag < 0) { ReadFast(); ReadMedia(); Paint(); }
+        if (w == T_POLL && g_open && g_drag < 0) {
+            if (g_detail == D_BT && GetTickCount64() - g_btReadAt >= 30000) LoadDetail(D_BT);
+            ReadFast(); ReadMedia(); Paint();
+        }
         return 0;
     case WM_MOUSELEAVE: g_ccHover = { -1, -1 }; if (Tahoe()) { Paint(); ui::FrameClock(h, WM_CC_FRAME, true); } return 0;  // o botão de Tela/Som some com fade
     case WM_LBUTTONDOWN:
@@ -2358,4 +2471,16 @@ void central::Toggle() {
     SetFocus(g_wnd);
     SetTimer(g_wnd, T_POLL, 1000, nullptr);
     ui::FrameClock(g_wnd, WM_CC_FRAME, true);
+}
+
+void central::RefreshBluetoothBatteries() {
+    if (GetTickCount64() - g_btReadAt >= 10000 || !g_btReadAt) LoadDetail(D_BT);
+}
+
+std::vector<central::BluetoothBattery> central::BluetoothBatteries() {
+    std::vector<BluetoothBattery> result;
+    std::lock_guard<std::mutex> l(g_mx);
+    for (const auto& device : g_bts)
+        if (device.connected && device.battery >= 0) result.push_back({ device.address, device.name, device.battery });
+    return result;
 }

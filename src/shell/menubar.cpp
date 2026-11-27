@@ -55,7 +55,7 @@ const float PAD_SEQUOIA = 10;     // espaço de cada lado de um ícone de status
 #define PAD (liquid::On() ? 8.f : PAD_SEQUOIA)
 
 bool g_overflow;  // macOS 27: algum ícone da bandeja não coube na barra (mostra a »)
-enum Kind { K_LOGO, K_APP, K_MENU, K_TRAY, K_NET, K_SPOT, K_CC, K_CLOCK, K_MORE, K_BATT, K_SOUND, K_BT, K_INPUT, K_SIRI, K_STATS };
+enum Kind { K_LOGO, K_APP, K_MENU, K_TRAY, K_NET, K_SPOT, K_CC, K_CLOCK, K_MORE, K_BATT, K_SOUND, K_BT, K_INPUT, K_SIRI, K_STATS, K_BT_BATT };
 struct Hit { D2D1_RECT_F r; Kind kind; int index; };
 
 HWND g_bar, g_owner;            // g_bar: a barra do monitor principal
@@ -531,6 +531,8 @@ void PegaStatus() {
 }
 
 void RefreshStatus() {
+    if (shell::Setting(L"barra_bluetooth", L"0") == L"1" || !shell::Setting(L"barra_baterias_bt", L"").empty())
+        central::RefreshBluetoothBatteries();
     PedeStatus();
     PegaStatus();
 }
@@ -1039,6 +1041,20 @@ void Render() {
         sym(name, bx, 13);
         }
     }
+    std::wstring selected = shell::Setting(L"barra_baterias_bt", L"");
+    if (!selected.empty()) {
+        std::wstring label;
+        for (const auto& device : central::BluetoothBatteries()) {
+            if (selected.find(L"|" + std::to_wstring(device.address) + L"|") == std::wstring::npos) continue;
+            auto part = device.name + L" " + std::to_wstring(device.percent) + L"%";
+            auto text = label.empty() ? part : label + L" · " + part;
+            if (r - ui::TextWidth(tfN, text) - 2 * PAD >= std::max(limD, leftEnd)) label = std::move(text);
+        }
+        if (!label.empty()) {
+            auto box = slot(ui::TextWidth(tfN, label) + 1, K_BT_BATT, 0);
+            rt->DrawTextW(label.c_str(), (UINT32)label.size(), tfN, box, br);
+        }
+    }
     // Som e Bluetooth: no Mac ficam fora da barra por padrão (Ajustes > Central de Controle liga)
     if (g_st.sound && shell::Setting(L"barra_som", L"0") == L"1") {
         const wchar_t* name = g_st.muted ? L"speaker.slash.fill" : g_st.phones ? L"headphones" : g_st.vol < 0.01f ? L"speaker.fill"
@@ -1518,7 +1534,37 @@ void Click(D2D1_POINT_2F p, bool right) {
         som::Toggle(ir);
         break;
     }
-    case K_BT: ShowAt(hit, { I(Tr(L"Bluetooth"), 0, true), Sep(), I(Tr(L"Ajustes de Bluetooth…"), 1) }, [](int) { shell::OpenSettings(L"bluetooth"); }); break;
+    case K_BT:
+    case K_BT_BATT: {
+        central::RefreshBluetoothBatteries();
+        auto devices = central::BluetoothBatteries();
+        auto selected = shell::Setting(L"barra_baterias_bt", L"");
+        std::vector<ctxmenu::Item> items{ I(Tr(L"Bluetooth"), 0, true) };
+        if (!devices.empty()) {
+            items.push_back(Sep());
+            items.push_back(I(Tr(L"Mostrar na barra de menus"), 0, true));
+            for (size_t i = 0; i < devices.size(); ++i) {
+                const auto& device = devices[i];
+                auto key = L"|" + std::to_wstring(device.address) + L"|";
+                items.push_back(I(device.name + L" " + std::to_wstring(device.percent) + L"%",
+                                  (int)i + 3, false, selected.find(key) != std::wstring::npos));
+            }
+        }
+        if (!selected.empty()) items.push_back(I(Tr(L"Limpar"), 2));
+        items.push_back(Sep());
+        items.push_back(I(Tr(L"Ajustes de Bluetooth…"), 1));
+        ShowAt(hit, items, [&](int id) {
+            if (id == 1) shell::OpenSettings(L"bluetooth");
+            else if (id == 2) shell::SetSetting(L"barra_baterias_bt", L"");
+            else if (id >= 3 && (size_t)(id - 3) < devices.size()) {
+                auto key = L"|" + std::to_wstring(devices[id - 3].address) + L"|";
+                if (auto pos = selected.find(key); pos == std::wstring::npos) selected += key;
+                else selected.erase(pos, key.size());
+                shell::SetSetting(L"barra_baterias_bt", selected);
+            }
+        });
+        break;
+    }
     case K_BATT: {
         wchar_t b[64]; swprintf_s(b, Tr(L"Bateria: %d%%"), g_st.pct);
         ShowAt(hit, { I(b, 0, true), I(g_st.charging ? Tr(L"Fonte de Energia: Carregador") : Tr(L"Fonte de Energia: Bateria"), 0, true), Sep(), I(Tr(L"Ajustes de Bateria…"), 1) },
