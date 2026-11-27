@@ -40,6 +40,7 @@ IUIAutomation* g_uia;
 
 struct State {
     HWND target = nullptr;                 // a janela do Explorer
+    HWND owner = nullptr;                  // parent of an in-shell modal alert
     std::function<void()> onYes;           // pergunta do próprio Shell (sem janela original)
     std::wstring title, info, yes, no;
     float titleH = 0, infoH = 0;
@@ -476,6 +477,11 @@ void Close() {
     ShowWindow(g_back, SW_HIDE);
     KillTimer(g_wnd, 1);
     g.target = nullptr;
+    if (g.owner && IsWindow(g.owner)) {
+        EnableWindow(g.owner, TRUE);
+        SetForegroundWindow(g.owner);
+    }
+    g.owner = nullptr;
     g.onYes = nullptr;
     g.idYes = g.idNo = g.idThird = 0;
     g.taskDlg = false;
@@ -567,7 +573,7 @@ void GuardaLugar(HWND dlg, const RECT& wr) {
 
 // textos da janela original (pergunta, nome do arquivo) e o alerta do Mac no lugar
 void Take(HWND dlg) {
-    if (g.target) return;
+    if (Aberto()) return;
     // Os textos direto dos Static da janela (caixas de mensagem como a "Confirm Save As" do Ableton). A UI
     // Automation voltava vazia nelas e a caixa ficava a do Windows (16/11/2026); ela segue para as do Explorer.
     std::vector<std::wstring> texts;
@@ -714,7 +720,7 @@ std::wstring Rotulo(const std::wstring& s) {  // botões do Windows em inglês �
     return s;
 }
 void TakeMessage(HWND dlg) {
-    if (g.target || !IsWindowVisible(dlg)) return;
+    if (Aberto() || !IsWindowVisible(dlg)) return;
     struct F { HWND text = nullptr; HWND btn[4]{}; int ids[4]{}; int n = 0; bool outro = false; } f;
     EnumChildWindows(dlg, [](HWND c, LPARAM l) -> BOOL {
         auto* f = (F*)l;
@@ -777,7 +783,7 @@ void Show(int cx, int cy) {
     g.titleH = TextH(g.title, 13, GoldenWide() ? DWRITE_FONT_WEIGHT_NORMAL : DWRITE_FONT_WEIGHT_BOLD, inner);
     g.infoH = TextH(g.info, GoldenAlert() ? 13.f : 11.f, DWRITE_FONT_WEIGHT_NORMAL, inner);
     g.hover = g.press = -1;
-    g.focus = 1;
+    g.focus = g.owner && !g.single ? 0 : 1;
     if (g.px.empty()) SetIcon(g.iconOf);
     float sc = Sc();
     int wpx = (int)std::lround(AW * sc), hpx = (int)std::lround(PanelH() * sc);
@@ -827,6 +833,25 @@ bool alertas::Confirm(const std::wstring& title, const std::wstring& info, const
     return true;
 }
 
+bool alertas::Prompt(HWND owner, const std::wstring& title, const std::wstring& info, const std::wstring& yes,
+                     std::function<void()> onYes, const std::wstring& icon, const std::wstring& cancel) {
+    if (!g_wnd || !owner || Aberto()) return false;
+    RECT bounds{};
+    if (!GetWindowRect(owner, &bounds)) return false;
+    g.owner = owner;
+    g.title = title;
+    g.info = info;
+    g.yes = yes;
+    g.no = cancel;
+    g.single = cancel.empty();
+    g.onYes = std::move(onYes);
+    SetIcon(icon);
+    EnableWindow(owner, FALSE);
+    Show((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+    SetTimer(g_wnd, 1, 300, nullptr);
+    return true;
+}
+
 namespace {
 
 bool IsDeleteDialog(HWND h) {
@@ -866,11 +891,12 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
             g_pendente = nullptr;
             return 0;
         }
-        if (g.target && !IsWindow(g.target)) Close();
+        if ((g.target && !IsWindow(g.target)) || (g.owner && !IsWindow(g.owner))) Close();
         return 0;
+    case WM_CLOSE: Answer(false); return 0;
     case WM_KEYDOWN:
         if (w == VK_ESCAPE) Answer(false);
-        else if (w == VK_RETURN) Answer(true);
+        else if (w == VK_RETURN) Answer(!g.owner || g.focus == 1);
         else if (w == VK_SPACE) { if (g.focus == 2) Answer(false, true); else Answer(g.focus == 1); }
         else if ((w == VK_TAB || w == VK_LEFT || w == VK_RIGHT || w == VK_DOWN || w == VK_UP) && !g.single) {
             if (g.idThird) g.focus = g.focus == 1 ? 2 : g.focus == 2 ? 0 : 1;

@@ -1561,6 +1561,11 @@ void ctxmenu::WarmupAsync(const std::wstring& folder, const std::wstring& file) 
 
 ctxmenu::Result ctxmenu::Show(HWND owner, POINT pt, const std::wstring& folder,
                               const std::vector<std::wstring>& paths, bool full) {
+    return Show(owner, pt, folder, paths, full, false);
+}
+
+ctxmenu::Result ctxmenu::Show(HWND owner, POINT pt, const std::wstring& folder,
+                              const std::vector<std::wstring>& paths, bool full, bool interceptUninstall) {
     Result res;
     bool bg = paths.empty();
     ShellMenu sm;
@@ -1599,12 +1604,12 @@ ctxmenu::Result ctxmenu::Show(HWND owner, POINT pt, const std::wstring& folder,
         res.chosen = true;
         res.verb = VerbOf(sm, r->cmd);
         if (res.verb == L"rename" && !bg) res.rename = true;
-        else res.hr = InvokeCmd(owner, sm, r->cmd, pt, folder);
+        else if (!interceptUninstall || res.verb != L"uninstall") res.hr = InvokeCmd(owner, sm, r->cmd, pt, folder);
         Log(L"Executado: %ls (id %u) → %ls 0x%08X", res.verb.empty() ? L"(sem verbo)" : res.verb.c_str(), r->cmd,
             SUCCEEDED(res.hr) ? L"OK" : L"erro", (unsigned)res.hr);
     }
     g_active = nullptr;
-    if (showAll) return Show(owner, pt, folder, paths, true);  // menu novo: há extensões que só preenchem submenus uma vez
+    if (showAll) return Show(owner, pt, folder, paths, true, interceptUninstall);  // menu novo: há extensões que só preenchem submenus uma vez
     return res;
 }
 
