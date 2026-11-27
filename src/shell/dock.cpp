@@ -882,7 +882,7 @@ void PaintBack() {
     float rad = DOCK_RADIUS;
     bool dark = ui::Dark();
     if (g_glass) {  // vidro da Composição: recorte com a mesma curva do Dock
-        SetWindowPos(g_back, g_icons, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        SetWindowPos(g_back, g_thumbWnd ? g_thumbWnd : g_icons, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         D2D1_COLOR_F tint = dark ? D2D1::ColorF(0.13f, 0.14f, 0.15f, 0.50f) : D2D1::ColorF(0.98f, 0.98f, 0.99f, 0.38f);
         // Tahoe: cor do vidro medida na tela (guia macOS26-Theme-Reference, seções 52 e 60): saída ≈ 0,61 × fundo + 0,11
         // no escuro (39 % de um cinza 0,28 por cima do fundo desfocado); no claro a média sobe ~0,11 (cinza 0,56)
@@ -899,7 +899,7 @@ void PaintBack() {
     // Sem a Composição: acrílico com o canto de 8 do DWM, encolhido para caber dentro da curva.
     int in = rad > 8 ? (int)std::ceil((rad - 8) * sc * 0.293f) + 1 : 0;
     x += in; y += in; w -= 2 * in; h -= 2 * in;
-    SetWindowPos(g_back, g_icons, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    SetWindowPos(g_back, g_thumbWnd ? g_thumbWnd : g_icons, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     auto* rt = ui::Begin(g_sb, w, h, sc);
     if (!rt) return;
     ID2D1SolidColorBrush* br = nullptr;
@@ -934,7 +934,6 @@ void UpdateThumbs(float baseline) {
     if (!g_thumbWnd) return;
     float sc = Sc();
     RECT strip = Strip();
-    RECT box{ LONG_MAX, LONG_MAX, LONG_MIN, LONG_MIN };
     std::vector<std::pair<const Item*, RECT>> rects;
     bool show = !g_fullscreen && g_reveal > 0.5f;
     for (auto& it : g_items) {
@@ -948,17 +947,23 @@ void UpdateThumbs(float baseline) {
         D2D1_RECT_F r = MinThumbRect(it, baseline);
         RECT px{ strip.left + (LONG)std::lround(r.left * sc), strip.top + (LONG)std::lround(r.top * sc), strip.left + (LONG)std::lround(r.right * sc), strip.top + (LONG)std::lround(r.bottom * sc) };
         rects.push_back({ &it, px });
-        box.left = std::min(box.left, px.left); box.top = std::min(box.top, px.top); box.right = std::max(box.right, px.right); box.bottom = std::max(box.bottom, px.bottom);
     }
     if (rects.empty() || !show) { ShowWindow(g_thumbWnd, SW_HIDE); return; }
-    // a janela cobre só as miniaturas (o resto da faixa continua clicável) e fica logo abaixo da dos ícones
-    SetWindowPos(g_thumbWnd, g_icons, box.left, box.top, box.right - box.left, box.bottom - box.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    // A janela fica sempre com a faixa inteira, como a dos ícones (cuja imagem nunca é recriada, então nada pisca).
+    // Antes ela era redimensionada para a caixa das miniaturas a cada quadro da ampliação e as miniaturas DWM
+    // piscavam quando o mouse deslizava sobre elas (o resize da janela hospedeira faz o DWM redesenhar em branco
+    // por um quadro). Agora a janela é fixa e só o destino de cada miniatura muda dentro dela. O clique continua
+    // passando através (WM_NCHITTEST = HTTRANSPARENT), por isso cobrir a faixa toda não atrapalha.
+    RECT cur; GetWindowRect(g_thumbWnd, &cur);
+    if (!IsWindowVisible(g_thumbWnd) || cur.left != strip.left || cur.top != strip.top || cur.right != strip.right || cur.bottom != strip.bottom) {
+        SetWindowPos(g_thumbWnd, g_icons, strip.left, strip.top, strip.right - strip.left, strip.bottom - strip.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
     for (auto& [it, px] : rects) {
         auto f = g_thumbs.find(it->win);
         if (f == g_thumbs.end()) continue;
         DWM_THUMBNAIL_PROPERTIES tp{};
         tp.dwFlags = DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE | DWM_TNP_OPACITY | DWM_TNP_SOURCECLIENTAREAONLY;
-        tp.rcDestination = { px.left - box.left, px.top - box.top, px.right - box.left, px.bottom - box.top };
+        tp.rcDestination = { px.left - strip.left, px.top - strip.top, px.right - strip.left, px.bottom - strip.top };
         tp.fVisible = TRUE; tp.opacity = 255; tp.fSourceClientAreaOnly = FALSE;
         DwmUpdateThumbnailProperties(f->second, &tp);
     }
@@ -2255,6 +2260,7 @@ void dock::Raise() {  // por cima de janelas de tela inteira nossas (Launchpad)
     auto alheias = shell::AlheiasNoTopo();
     SetWindowPos(g_back, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetWindowPos(g_icons, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (g_thumbWnd) SetWindowPos(g_thumbWnd, g_icons, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);  // miniaturas acima do vidro
     MenusPorCima();
     shell::DevolveAlheias(alheias);
 }
