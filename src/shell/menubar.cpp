@@ -55,7 +55,7 @@ const float PAD_SEQUOIA = 10;     // espaço de cada lado de um ícone de status
 #define PAD (liquid::On() ? 8.f : PAD_SEQUOIA)
 
 bool g_overflow;  // macOS 27: algum ícone da bandeja não coube na barra (mostra a »)
-enum Kind { K_LOGO, K_APP, K_MENU, K_TRAY, K_NET, K_SPOT, K_CC, K_CLOCK, K_MORE, K_BATT, K_SOUND, K_BT, K_INPUT, K_SIRI, K_STATS, K_BT_BATT };
+enum Kind { K_LOGO, K_APP, K_MENU, K_TRAY, K_NET, K_SPOT, K_CC, K_CLOCK, K_MORE, K_BATT, K_SOUND, K_BT, K_INPUT, K_SIRI, K_STATS };
 struct Hit { D2D1_RECT_F r; Kind kind; int index; };
 
 HWND g_bar, g_owner;            // g_bar: a barra do monitor principal
@@ -1041,20 +1041,6 @@ void Render() {
         sym(name, bx, 13);
         }
     }
-    std::wstring selected = shell::Setting(L"barra_baterias_bt", L"");
-    if (!selected.empty()) {
-        std::wstring label;
-        for (const auto& device : central::BluetoothBatteries()) {
-            if (selected.find(L"|" + std::to_wstring(device.address) + L"|") == std::wstring::npos) continue;
-            auto part = device.name + L" " + std::to_wstring(device.percent) + L"%";
-            auto text = label.empty() ? part : label + L" · " + part;
-            if (r - ui::TextWidth(tfN, text) - 2 * PAD >= std::max(limD, leftEnd)) label = std::move(text);
-        }
-        if (!label.empty()) {
-            auto box = slot(ui::TextWidth(tfN, label) + 1, K_BT_BATT, 0);
-            rt->DrawTextW(label.c_str(), (UINT32)label.size(), tfN, box, br);
-        }
-    }
     // Som e Bluetooth: no Mac ficam fora da barra por padrão (Ajustes > Central de Controle liga)
     if (g_st.sound && shell::Setting(L"barra_som", L"0") == L"1") {
         const wchar_t* name = g_st.muted ? L"speaker.slash.fill" : g_st.phones ? L"headphones" : g_st.vol < 0.01f ? L"speaker.fill"
@@ -1062,20 +1048,72 @@ void Render() {
         auto bx = slot(g_st.phones ? 16 : 21, K_SOUND, 0);
         sym(name, bx, g_st.phones ? 16 : 14);
     }
-    if (g_st.bt && shell::Setting(L"barra_bluetooth", L"0") == L"1") {  // o símbolo do Bluetooth do Mac (não está no SF Symbols público)
-        auto bx = slot(9, K_BT, 0);
-        float cx = (bx.left + bx.right) / 2, cy = H / 2, hh = 7.2f, ww = 3.9f;
-        ID2D1PathGeometry* g = nullptr;
-        if (SUCCEEDED(ui::d2d->CreatePathGeometry(&g))) {
-            ID2D1GeometrySink* sk = nullptr; g->Open(&sk);
-            sk->BeginFigure({ cx - ww, cy - hh * 0.48f }, D2D1_FIGURE_BEGIN_HOLLOW);
-            D2D1_POINT_2F pts[] = { { cx + ww, cy + hh * 0.48f }, { cx, cy + hh }, { cx, cy - hh }, { cx + ww, cy - hh * 0.48f }, { cx - ww, cy + hh * 0.48f } };
-            sk->AddLines(pts, 5); sk->EndFigure(D2D1_FIGURE_END_OPEN); sk->Close(); sk->Release();
-            ID2D1StrokeStyle* st = nullptr;
-            ui::d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND), nullptr, 0, &st);
-            rt->DrawGeometry(g, br, 1.5f, st);
-            if (st) st->Release();
-            g->Release();
+    const bool showBluetooth = g_st.bt && shell::Setting(L"barra_bluetooth", L"0") == L"1";
+    struct BatteryIndicator {
+        const wchar_t* symbol;
+        const wchar_t* fallback;
+        std::wstring percent;
+        float width;
+    };
+    constexpr float iconWidth = 14, iconGap = 3, deviceGap = 8, bluetoothGap = 6;
+    std::vector<BatteryIndicator> batteries;
+    float btWidth = showBluetooth ? 9.f : 0.f;
+    const auto selected = shell::Setting(L"barra_baterias_bt", L"");
+    if (!selected.empty()) {
+        for (const auto& device : central::BluetoothBatteries()) {
+            if (selected.find(L"|" + std::to_wstring(device.address) + L"|") == std::wstring::npos) continue;
+
+            const wchar_t* symbol = L"battery.100percent";
+            const wchar_t* fallback = L"\uE850";
+            auto name = device.name;
+            for (auto& ch : name) ch = towlower(ch);
+            if (name.find(L"headphone") != std::wstring::npos || name.find(L"headset") != std::wstring::npos ||
+                name.find(L"earbud") != std::wstring::npos || name.find(L"airpods") != std::wstring::npos) {
+                symbol = L"headphones";
+                fallback = L"\uE7F6";
+            } else if (name.find(L"controller") != std::wstring::npos || name.find(L"gamepad") != std::wstring::npos ||
+                       name.find(L"xbox") != std::wstring::npos || name.find(L"dualsense") != std::wstring::npos) {
+                symbol = L"gamecontroller.fill";
+                fallback = L"\uE7FC";
+            } else if (name.find(L"phone") != std::wstring::npos || name.find(L"galaxy") != std::wstring::npos) {
+                symbol = nullptr;
+                fallback = L"\uE8EA";
+            }
+            auto percent = std::to_wstring(device.percent) + L"%";
+            float width = iconWidth + iconGap + ui::TextWidth(tfN, percent) + 1;
+            float gap = batteries.empty() ? (showBluetooth ? bluetoothGap : 0.f) : deviceGap;
+            if (r - btWidth - gap - width - 2 * PAD < std::max(limD, leftEnd)) continue;
+            btWidth += gap + width;
+            batteries.push_back({ symbol, fallback, std::move(percent), width });
+        }
+    }
+    if (btWidth > 0) {
+        // O rádio e as baterias abrem o mesmo menu e compartilham a mesma área de clique.
+        auto group = slot(btWidth, K_BT, 0);
+        float cursor = group.left;
+        if (showBluetooth) {
+            auto bx = D2D1::RectF(cursor, 0, cursor + 9, H);
+            float cx = (bx.left + bx.right) / 2, cy = H / 2, hh = 7.2f, ww = 3.9f;
+            ID2D1PathGeometry* g = nullptr;
+            if (SUCCEEDED(ui::d2d->CreatePathGeometry(&g))) {
+                ID2D1GeometrySink* sk = nullptr; g->Open(&sk);
+                sk->BeginFigure({ cx - ww, cy - hh * 0.48f }, D2D1_FIGURE_BEGIN_HOLLOW);
+                D2D1_POINT_2F pts[] = { { cx + ww, cy + hh * 0.48f }, { cx, cy + hh }, { cx, cy - hh }, { cx + ww, cy - hh * 0.48f }, { cx - ww, cy + hh * 0.48f } };
+                sk->AddLines(pts, 5); sk->EndFigure(D2D1_FIGURE_END_OPEN); sk->Close(); sk->Release();
+                ID2D1StrokeStyle* st = nullptr;
+                ui::d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND), nullptr, 0, &st);
+                rt->DrawGeometry(g, br, 1.5f, st);
+                if (st) st->Release();
+                g->Release();
+            }
+            cursor += 9 + bluetoothGap;
+        }
+        for (const auto& device : batteries) {
+            auto icon = D2D1::RectF(cursor, 0, cursor + iconWidth, H);
+            if (!device.symbol || !sym(device.symbol, icon, 12)) rt->DrawTextW(device.fallback, 1, g_tfIcon, icon, br);
+            auto text = D2D1::RectF(icon.right + iconGap, 0, cursor + device.width, H);
+            rt->DrawTextW(device.percent.c_str(), (UINT32)device.percent.size(), tfN, text, br);
+            cursor += device.width + deviceGap;
         }
     }
     // issue #44: uso do sistema, como os apps de monitor do Mac (Stats, iStat Menus): o nome pequeno em cima e a
@@ -1534,8 +1572,7 @@ void Click(D2D1_POINT_2F p, bool right) {
         som::Toggle(ir);
         break;
     }
-    case K_BT:
-    case K_BT_BATT: {
+    case K_BT: {
         central::RefreshBluetoothBatteries();
         auto devices = central::BluetoothBatteries();
         auto selected = shell::Setting(L"barra_baterias_bt", L"");
