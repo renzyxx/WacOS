@@ -41,6 +41,9 @@
 #include <intrin.h>
 #include "../comum/vidro.h"
 #include <bluetoothapis.h>
+#include <cfgmgr32.h>
+#include <cfg.h>
+#pragma comment(lib, "cfgmgr32.lib")
 #pragma comment(lib, "bthprops.lib")
 
 #pragma comment(lib, "windowsapp.lib")
@@ -1171,6 +1174,54 @@ float DetailH() {
     return h + DET_SEP + DET_LINK + 10;
 }
 
+// O Windows publica o nível no nó do dispositivo BLE ou no perfil Hands-Free clássico.
+void ReadWindowsBluetoothBatteries(std::vector<BtDevice>& devices) {
+    constexpr DEVPROPKEY batteryKey{ { 0x104ea319, 0x6ee2, 0x4701, { 0xbd, 0x47, 0x8d, 0xdb, 0xf4, 0x25, 0xbb, 0xe5 } }, 2 };
+    constexpr DEVPROPKEY addressKey{ { 0x2bd67d8b, 0x8beb, 0x48d5, { 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a } }, 1 };
+    constexpr DEVPROPKEY nameKey{ { 0xb725f130, 0x47ef, 0x101a, { 0xa5, 0xf1, 0x02, 0x60, 0x8c, 0x9e, 0xeb, 0xac } }, 10 };
+    constexpr ULONG flags = CM_GETIDLIST_FILTER_ENUMERATOR | CM_GETIDLIST_FILTER_PRESENT;
+    for (const wchar_t* enumerator : { L"BTHENUM", L"BTHLE" }) {
+        const bool le = wcscmp(enumerator, L"BTHLE") == 0;
+        ULONG count = 0;
+        if (CM_Get_Device_ID_List_SizeW(&count, enumerator, flags) != CR_SUCCESS || count <= 1) continue;
+        std::vector<wchar_t> ids(count);
+        if (CM_Get_Device_ID_ListW(enumerator, ids.data(), count, flags) != CR_SUCCESS) continue;
+        for (wchar_t* id = ids.data(); *id; id += wcslen(id) + 1) {
+            DEVINST node;
+            if (CM_Locate_DevNodeW(&node, id, CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) continue;
+            ULONG status, problem;
+            if (CM_Get_DevNode_Status(&status, &problem, node, 0) != CR_SUCCESS ||
+                !(status & DN_STARTED) || (status & DN_DEVICE_DISCONNECTED)) continue;
+
+            BYTE level;
+            DEVPROPTYPE type;
+            ULONG size = sizeof(level);
+            if (CM_Get_DevNode_PropertyW(node, &batteryKey, &type, &level, &size, 0) != CR_SUCCESS ||
+                type != DEVPROP_TYPE_BYTE || size != sizeof(level) || level > 100) continue;
+
+            wchar_t text[32]{};
+            size = sizeof(text);
+            if (CM_Get_DevNode_PropertyW(node, &addressKey, &type, reinterpret_cast<PBYTE>(text), &size, 0) != CR_SUCCESS ||
+                type != DEVPROP_TYPE_STRING || wcslen(text) != 12) continue;
+            wchar_t* end;
+            auto address = wcstoull(text, &end, 16);
+            if (*end || !address) continue;
+            auto found = std::find_if(devices.begin(), devices.end(), [address](auto const& device) { return device.address == address; });
+            if (found != devices.end()) {
+                if (le || found->connected) {
+                    found->connected = true;
+                    found->battery = level;
+                }
+            } else if (le) {
+                wchar_t name[256]{};
+                size = sizeof(name);
+                if (CM_Get_DevNode_PropertyW(node, &nameKey, &type, reinterpret_cast<PBYTE>(name), &size, 0) == CR_SUCCESS &&
+                    type == DEVPROP_TYPE_STRING && *name) devices.push_back({ address, name, true, level });
+            }
+        }
+    }
+}
+
 int ReadBtBattery(const winrt::Windows::Devices::Bluetooth::BluetoothLEDevice& device) {
     using namespace winrt::Windows::Devices::Bluetooth;
     using namespace GenericAttributeProfile;
@@ -1205,26 +1256,6 @@ void AddBluetoothDevices(std::vector<BtDevice>& devices) {
         return;
     }
     constexpr wchar_t batteryKey[] = L"System.Devices.BatteryLife";
-    try {
-        auto selector = BluetoothDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected);
-        for (auto const& info : DeviceInformation::FindAllAsync(selector, { winrt::hstring(batteryKey) }, DeviceInformationKind::AssociationEndpoint).get()) {
-            int level = winrt::unbox_value_or<uint8_t>(info.Properties().TryLookup(batteryKey), 255);
-            if (level > 100) continue;
-            try {
-                auto device = BluetoothDevice::FromIdAsync(info.Id()).get();
-                if (!device || device.ConnectionStatus() != BluetoothConnectionStatus::Connected) continue;
-                for (auto& entry : devices) if (entry.address == device.BluetoothAddress()) {
-                    entry.connected = true;
-                    entry.battery = level;
-                    break;
-                }
-            } catch (winrt::hresult_error const&) {
-                // Pode ter desconectado depois da enumeração.
-            }
-        }
-    } catch (winrt::hresult_error const&) {
-        // Continua com o Bluetooth LE.
-    }
     try {
         auto selector = BluetoothLEDevice::GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus::Connected);
         for (auto const& info : DeviceInformation::FindAllAsync(selector, { winrt::hstring(batteryKey) }, DeviceInformationKind::AssociationEndpoint).get()) {
@@ -1304,6 +1335,7 @@ void LoadDetail(int kind) {
                 } while (BluetoothFindNextDevice(f, &di));
                 BluetoothFindDeviceClose(f);
             }
+            ReadWindowsBluetoothBatteries(r);
             AddBluetoothDevices(r);
             std::stable_sort(r.begin(), r.end(), [](auto& a, auto& b) { return a.connected > b.connected; });
             std::lock_guard<std::mutex> l(g_mx);
