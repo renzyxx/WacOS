@@ -245,7 +245,7 @@ bool Create(HINSTANCE hi);
 void Update();          // app ativo mudou, relógio, ícones
 HWND Hwnd();
 int Height();           // px
-void SetFullscreen(bool on, HMONITOR mon = nullptr);  // app em tela cheia na frente: some (só no monitor dele; nullptr = todos)
+void SetFullscreen(bool on, HMONITOR mon = nullptr, HWND janela = nullptr);  // app em tela cheia na frente: some (só no monitor dele; nullptr = todos). janela: the fullscreen window (nullptr = the foreground one)
 int HeightOn(HMONITOR mon);  // px da barra naquele monitor (cada monitor tem a sua barra)
 int ReservedOn(HMONITOR mon);  // px que a barra ocupa no topo daquele monitor (0: secundário sem barra, barra_todos_monitores=0, ou barra embaixo)
 bool Embaixo();         // barra_embaixo: a barra está na linha do Dock (Dock embaixo no monitor principal, fora do Leopard)

@@ -1837,13 +1837,13 @@ static void TiqueOcultar() {
     if (!fora) fora = agora;
     if (agora - fora >= 400) { fora = 0; Revela(false); }
 }
-void menubar::SetFullscreen(bool on, HMONITOR mon) {
+void menubar::SetFullscreen(bool on, HMONITOR mon, HWND janela) {
     if (!g_bar) return;
     bool revela = false;
     if (on && mon && !bloqueio::Active() && shell::Setting(L"barra_tela_cheia", L"1") == L"1") {
         QUERY_USER_NOTIFICATION_STATE q{};
         bool d3d = SUCCEEDED(SHQueryUserNotificationState(&q)) && q == QUERY_USER_NOTIFICATION_STATE::QUNS_RUNNING_D3D_FULL_SCREEN;
-        HWND fg = GetForegroundWindow();
+        HWND fg = janela ? janela : GetForegroundWindow();  // the fullscreen app, even when another monitor has the focus (issue #126)
         wchar_t cls[64] = {}, path[MAX_PATH] = {};
         GetClassNameW(fg, cls, 64);
         DWORD pid = 0; GetWindowThreadProcessId(fg, &pid);

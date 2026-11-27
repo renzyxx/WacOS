@@ -975,10 +975,20 @@ bool shell::NaoIncomodar(HMONITOR mon) {
 
 // Com mais de um monitor, só some o que está no monitor do app em tela cheia (a barra daquele monitor; o Dock
 // se ele estiver lá). Tela travada: tudo some.
+// Issue #126: the fullscreen window stays fullscreen when the user clicks an app on another monitor. It is no longer
+// the foreground window, but its monitor keeps its menu bar (and the Dock, if it is there) hidden until something on
+// that same monitor takes the foreground or the window leaves fullscreen.
+static HWND g_fsJanela;
 static void CheckFullscreen() {
     HWND fg = GetForegroundWindow();
     bool locked = bloqueio::Active();
     bool fs = !locked && IsFullscreen(fg);
+    if (fs) g_fsJanela = fg;
+    else if (!locked && g_fsJanela && fg != g_fsJanela && IsWindow(g_fsJanela) && IsFullscreen(g_fsJanela)
+             && (!fg || MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST) != MonitorFromWindow(g_fsJanela, MONITOR_DEFAULTTONEAREST))) {
+        fg = g_fsJanela; fs = true;  // foreground is on another monitor: the fullscreen app is still there
+    }
+    else g_fsJanela = nullptr;
     HMONITOR fm = fs ? MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST) : nullptr;
     {   // registro: quem fez o Dock e a barra de menus sumirem (uma vez por janela)
         static HWND visto;
@@ -990,14 +1000,14 @@ static void CheckFullscreen() {
         visto = fs ? fg : nullptr;
     }
     dock::SetFullscreen(locked || (fs && fm == dock::MonitorHandle()));
-    menubar::SetFullscreen(locked || fs, fm);
+    menubar::SetFullscreen(locked || fs, fm, fs ? fg : nullptr);
     ilha::SetFullscreen(locked);  // a ilha confere sozinha a tela cheia do monitor principal (jogo, vídeo, app)
 }
 
 static void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD ev, HWND h, LONG obj, LONG, DWORD, DWORD) {
     // maximizada por cima da barra/do Dock (issue #24): qualquer janela de topo (a conferência é barata e sai cedo)
     if (ev == EVENT_OBJECT_LOCATIONCHANGE && obj == OBJID_WINDOW && !shell::nativo && h && GetAncestor(h, GA_ROOT) == h) limites::Maximizada(h);
-    if (ev == EVENT_OBJECT_LOCATIONCHANGE && (obj != OBJID_WINDOW || h != GetForegroundWindow())) return;
+    if (ev == EVENT_OBJECT_LOCATIONCHANGE && (obj != OBJID_WINDOW || (h != GetForegroundWindow() && h != g_fsJanela))) return;
     if (ev == EVENT_SYSTEM_FOREGROUND) { revelar::Foreground(h); jogo::Foreground(h); }
     CheckFullscreen();
 }
