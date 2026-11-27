@@ -367,3 +367,266 @@ in `docs/windhawk/bloqueio-sequoia/` is derived from GPL-3.0 code and keeps that
 
 Apple, macOS, Finder and related names and icons belong to Apple Inc. This is a personal, non-commercial project
 and is not affiliated with Apple. The bundled icons, fonts and sounds are for personal use only.
+
+<details>
+<summary><b>PT-BR version</b></summary>
+  
+---
+
+# WacOS (Português Brasileiro)
+
+<div align="center">
+
+**macOS sobre o Windows 11: barra de menus, Dock, Finder, Spotlight, Central de Controle e Liquid Glass, em C++ nativo.**
+
+</div>
+
+O WacOS funciona sobre o Windows (com o mesmo kernel, drivers e aplicativos) e substitui os elementos com os quais você interage: barra de menus, Dock, Finder, Spotlight, Central de Controle, Central de Notificações, Mission Control, Launchpad, barras de título das janelas e um conjunto de aplicativos integrados. Escolha o novo visual do macOS 27 **Golden Gate**, o visual do macOS Tahoe com Liquid Glass, o visual do macOS Sequoia ou o clássico visual Aqua do **Mac OS X Leopard** (2007).
+
+Tudo é desenvolvido em C++ nativo (Win32, Direct2D, DirectComposition). Sem Electron e sem visualizações web. O projeto utiliza aproximadamente 750 MB de RAM e menos de 1% de CPU em um desktop com resolução de 3440×1440.
+
+https://github.com/user-attachments/assets/02e58b90-9ccb-4b63-852a-8c0ebd2c3375
+
+**Conteúdo:** [Capturas de tela](#capturas-de-tela) · [Recursos](#recursos) · [Siri com IA](#siri-com-ia) · [Instalação](#instalação) · [É seguro?](#é-seguro) · [Testes e estabilidade](#testes-e-estabilidade) · [Roadmap](#roadmap) · [Apoie o projeto](#apoie-o-projeto) · [Compilação](#compilação) · [Estrutura](#estrutura) · [Desempenho](#desempenho) · [Licença](#licença) · [Observação](#observação)
+
+## Capturas de tela
+
+Quatro temas disponíveis em Ajustes do Sistema > Aparência > Tema. Alternar entre os temas nunca altera o papel de parede escolhido por você.
+
+### 1. macOS 27 Golden Gate (novo)
+
+O visual mais recente, baseado nas capturas de tela do macOS 27 da Apple: Liquid Glass fosco nas janelas, nos menus e no Dock, barras de ferramentas unificadas, ícones do macOS 27 e o papel de parede Golden Gate.
+
+![Área de trabalho do WacOS no tema macOS 27 Golden Gate](docs/screenshots/golden-gate-desktop.png)
+
+| | |
+|---|---|
+| ![Quick Look, Golden Gate](docs/screenshots/golden-gate-quick-look.png) **Quick Look** reproduz vídeos e músicas, com cabeçalho fosco e animação de abertura e fechamento | ![Fotos, Golden Gate](docs/screenshots/golden-gate-photos.png) **Fotos** com pesquisa |
+| ![Finder, Golden Gate](docs/screenshots/golden-gate-finder.png) **Finder** | ![Ajustes do Sistema, Golden Gate](docs/screenshots/golden-gate-system-settings.png) **Ajustes do Sistema** > Aparência, para todos os temas |
+| ![Notas, Golden Gate](docs/screenshots/golden-gate-notes.png) **Notas** | ![Calendário, Golden Gate](docs/screenshots/golden-gate-calendar.png) **Calendário** |
+| ![Lembretes, Golden Gate](docs/screenshots/golden-gate-reminders.png) **Lembretes** | ![Música, Golden Gate](docs/screenshots/golden-gate-music.png) **Música** com pesquisa |
+| ![Relógio, Golden Gate](docs/screenshots/golden-gate-clock.png) **Relógio** com horários do nascer e do pôr do sol | ![Clima, Golden Gate](docs/screenshots/golden-gate-weather.png) **Clima** |
+| ![Monitor de Atividade, Golden Gate](docs/screenshots/golden-gate-activity-monitor.png) **Monitor de Atividade** | ![Pré-Visualização, Golden Gate](docs/screenshots/golden-gate-preview.png) **Pré-Visualização** |
+| ![Calculadora, Golden Gate](docs/screenshots/golden-gate-calculator.png) **Calculadora** | ![Terminal, Golden Gate](docs/screenshots/golden-gate-terminal.png) **Terminal** |
+| ![TextEdit, Golden Gate](docs/screenshots/golden-gate-textedit.png) **TextEdit** | |
+
+Também são novidades deste tema: QuickTime Player com barra de título fosca sobre o vídeo, opção para ocultar os ícones da área de trabalho, **Editar Widgets…** no menu da área de trabalho, clique na faixa vazia ao lado do Dock para mostrar a área de trabalho, Win+D controlado pelo shell, notificações agrupadas que abrem ao serem clicadas e efeito de vidro mais suave sobre papéis de parede animados.
+
+### Liquid Glass em movimento
+
+Vidro real sobre o que estiver atrás dele, em tempo real: refração, aberração cromática e o efeito fosco de cada tema.
+
+![Uma janela passando atrás do Dock](docs/screenshots/liquid-glass-dock.gif)
+
+| | |
+|---|---|
+| ![Seletor de aplicativos sobre conteúdo em movimento](docs/screenshots/liquid-glass-alt-tab.gif) **Seletor de aplicativos** (Alt+Tab) | ![Central de Controle sobre conteúdo em movimento](docs/screenshots/liquid-glass-control-center.gif) **Central de Controle** |
+
+### 2. macOS Tahoe (Liquid Glass)
+
+O visual do macOS 26: Liquid Glass transparente, com refração real e aberração cromática.
+
+![Área de trabalho do WacOS no tema Tahoe](docs/screenshots/desktop.png)
+
+| | |
+|---|---|
+| ![Central de Controle em Liquid Glass](docs/screenshots/control-center.png) **Central de Controle** em Liquid Glass, com refração real e aberração cromática | ![Central de Notificações](docs/screenshots/notification-center.png) **Central de Notificações** com widgets |
+| ![Spotlight](docs/screenshots/spotlight.png) **Spotlight** | ![Modo Aplicativos do Spotlight](docs/screenshots/spotlight-apps.png) **Aplicativos** (modo Aplicativos do Spotlight, com categorias) |
+| ![Finder](docs/screenshots/finder.png) **Finder** | ![Ajustes do Sistema](docs/screenshots/system-settings.png) **Ajustes do Sistema** |
+| ![Monitor de Atividade](docs/screenshots/activity-monitor.png) **Monitor de Atividade** | ![Forçar Encerramento de Aplicativos](docs/screenshots/force-quit.png) **Forçar Encerramento de Aplicativos** (Ctrl+Alt+Esc) |
+| ![Alerta do macOS](docs/screenshots/alert.png) As caixas de mensagem do Windows são substituídas por **alertas do macOS** | ![Estilos de ícones do Dock](docs/screenshots/dock-icon-styles.png) **Estilos de ícones do Dock**: Padrão, Escuro, Transparente e Matizado |
+
+### 3. macOS Sequoia
+
+O mesmo shell com o visual do macOS 15 (Ajustes do Sistema > Aparência > Tema).
+
+![Área de trabalho do WacOS no tema Sequoia](docs/screenshots/sequoia-desktop.png)
+
+| | |
+|---|---|
+| ![Central de Controle, Sequoia](docs/screenshots/sequoia-control-center.png) **Central de Controle** | ![Central de Notificações, Sequoia](docs/screenshots/sequoia-notification-center.png) **Central de Notificações** |
+| ![Launchpad](docs/screenshots/sequoia-launchpad.png) **Launchpad** | ![Spotlight, Sequoia](docs/screenshots/sequoia-spotlight.png) **Spotlight** |
+| ![Finder, Sequoia](docs/screenshots/sequoia-finder.png) **Finder** | ![Ajustes do Sistema, Sequoia](docs/screenshots/sequoia-system-settings.png) **Ajustes do Sistema** com os papéis de parede do Sequoia |
+
+### 4. Mac OS X Leopard (novo)
+
+O visual Aqua de 2007, desenhado do zero (sem reaproveitar elementos dos temas modernos): base 3D brilhante do Dock com reflexos, barra de menus translúcida, botões em gel, janelas de metal escovado, Cover Flow no Finder, Preferências do Sistema organizadas como no 10.5, Quick Look como um HUD escuro, Dashboard, Spaces, Time Machine e o cursor do Leopard (o cursor anterior é restaurado ao trocar de tema).
+
+![Dock, Leopard](docs/screenshots/leopard-dock.png)
+
+| | |
+|---|---|
+| ![Finder com Cover Flow, Leopard](docs/screenshots/leopard-finder.png) **Finder** com Cover Flow | ![Preferências do Sistema, Leopard](docs/screenshots/leopard-system-preferences.png) **Preferências do Sistema** |
+| ![Quick Look, Leopard](docs/screenshots/leopard-quick-look.png) HUD do **Quick Look** | ![Sobre Este Mac, Leopard](docs/screenshots/leopard-about.png) **Sobre Este Mac** com as especificações reais do seu PC |
+
+## Recursos
+
+- **Barra de menus** com os menus reais do aplicativo ativo, menu Apple, ícones de status e bandeja do sistema. Os ícones ocultos da bandeja podem ser acessados por uma lista que mostra o ícone e o nome de cada aplicativo. Novidade: é possível mover a barra de menus para a **parte inferior, ao lado do Dock** (Ajustes do Sistema > Central de Controle).
+- **Dock** com ampliação de ícones, indicadores de aplicativos em execução, pilhas (Downloads), janelas minimizadas e Lixeira. Posicione-o na **parte inferior, à esquerda ou à direita**, mantenha-o sempre oculto ou oculte-o apenas quando uma janela se aproximar (**ocultação inteligente**). Personalize espaçamento, distância da borda, arredondamento dos cantos, cor e opacidade do vidro, rótulos, indicadores e divisor.
+- **Alterar Ícone…**: clique com o botão direito em um aplicativo no Dock ou no Launchpad para usar seu próprio arquivo PNG/ICO e restaurar o ícone original quando quiser.
+- **Animação Genie** de minimização, desenhada pelo compositor, com bordas suaves durante todo o percurso até o Dock.
+- **Finder** (gerenciador de arquivos), **Spotlight**, **Central de Controle**, **Central de Notificações**, **Mission Control**, **Launchpad / Aplicativos**, **Quick Look**, **Stage Manager** e **Cantos Ativos**.
+- **Spotlight** pesquisa aplicativos, arquivos, pastas e a web, realiza cálculos e completa a melhor correspondência enquanto você digita, com modos de Aplicativos, Arquivos, Ações e Área de Transferência. Novidade: também encontra **configurações e ferramentas do Windows** ("gerenciador de dispositivos", "adicionar ou remover programas", serviços, tela, Wi-Fi e cerca de 200 tarefas do Painel de Controle), cada uma com seu próprio ícone.
+- **Barras de título estilo Mac** (botões de fechar, minimizar e maximizar, cantos arredondados e sombras) nas janelas de outros aplicativos, inclusive aplicativos GTK como GIMP 3. Chrome, Discord, Spotify e outros aplicativos Chromium/Electron mantêm sua própria barra, mas recebem cantos arredondados e uma borda no estilo Mac que acompanha a aparência clara ou escura do próprio aplicativo.
+- **Botões Mac no Chrome, Discord e outros aplicativos Electron** (novo, **experimental**, desativado por padrão): os botões coloridos passam para a barra de título do próprio aplicativo, substituindo os botões do Windows. Ative em Ajustes do Sistema > Mesa e Dock > "Botões Mac em aplicativos com barra de título própria". Comentários são bem-vindos nas issues.
+- **Alertas do macOS** no lugar das caixas de mensagem do Windows e painel Mac de Abrir/Salvar por meio do Finder.
+- **Aplicativos integrados**: Ajustes do Sistema, Monitor de Atividade (com pressão de memória), Terminal, Calculadora, Notas, Lembretes, Calendário, TextEdit, Pré-Visualização, Fotos, Música, QuickTime Player, Relógio, Clima, Contatos, Time Machine, Captura de Tela e Forçar Encerramento.
+- **Siri com IA** (novo): faça perguntas digitando ou por voz, pelo Spotlight, pela barra de menus ou com Win+S. Utiliza o serviço de IA escolhido por você com sua própria chave, um modelo em execução no PC ou um aplicativo de IA que já esteja instalado. Consulte [Siri com IA](#siri-com-ia).
+- **Gerenciamento de memória como no macOS**: pressão de memória, App Nap e memória liberável.
+- **Temas**: macOS 27 Golden Gate, macOS Tahoe, macOS Sequoia e Mac OS X Leopard.
+- **Dynamic Island** (opcional, Ajustes do Sistema > Central de Controle): música, temporizadores, notificações e volume em uma cápsula ou em um **recorte** na parte superior da tela, além de um **histórico da área de transferência** com as últimas 20 cópias (textos e arquivos), preservadas entre reinicializações e criptografadas para o usuário do Windows.
+- **Modo de Jogo** como no macOS: quando um jogo passa para primeiro plano, o WacOS desativa os recursos de maior custo (vidro real, efeitos do mouse, Cantos Ativos e indexação de arquivos) até o jogo ser fechado. Inicializadores de jogos (Riot Client, EA app, Ubisoft Connect, Battle.net e outros) não são considerados jogos. Ajustes do Sistema > Energia.
+- **Launchpad**: oculte qualquer aplicativo (clique com o botão direito > Ocultar do Launchpad) ou todas as ferramentas de sistema do Windows de uma só vez.
+- **Estilos de ícones** (Padrão, Escuro, Transparente e Matizado), cores de destaque e aparência clara e escura.
+- **Personalização da área de trabalho** (tamanho dos ícones, espaçamento da grade, tamanho do texto e widgets), **notificações** (duração dos banners e widgets da Central de Notificações) e **barra de menus** (exibição em todos os monitores ou somente no principal).
+- **Calendário** com feriados do seu país e início da semana na segunda-feira ou no domingo, **Clima** com qualquer cidade como localização e **Relógio** com cidades personalizadas e alarmes.
+- **12 idiomas**: inglês (padrão), português, espanhol, francês, alemão, italiano, japonês, chinês, coreano, russo, polonês e turco (Ajustes do Sistema > Geral > Idioma). As datas também acompanham o idioma selecionado.
+
+## Siri com IA
+
+Novidade no WacOS: uma **Siri** que realmente responde, usando a inteligência artificial escolhida por você. A resposta aparece em um painel de vidro na parte superior da tela, palavra por palavra, enquanto o brilho do Apple Intelligence percorre sua borda durante o processamento.
+
+<p align="center"><img src="docs/screenshots/siri-demo.gif" alt="Siri respondendo a uma pergunta no WacOS" width="600"></p>
+
+- **Pergunte de qualquer lugar:** pressione **Win+S**, clique no ícone da Siri na barra de menus ou digite uma pergunta no Spotlight e selecione **Perguntar à Siri**. Comece a digitar depois de uma resposta para fazer a próxima pergunta.
+- **Fale com ela:** clique no microfone e fale. A transcrição utiliza o reconhecimento de fala do próprio Windows, no idioma configurado no WacOS.
+- **Sua IA, sua chave:** Google Gemini, OpenAI, Anthropic Claude, Groq, OpenRouter, Mistral, DeepSeek ou xAI Grok com sua própria chave de API. A lista de modelos vem do serviço, então novos modelos aparecem ao selecionar **Atualizar**.
+- **Totalmente local, se preferir:** Ollama ou LM Studio executando um modelo no seu PC, sem que os dados saiam dele.
+- **Sem precisar de chave:** utilize o aplicativo Codex ou Claude Code no qual você já esteja conectado no PC.
+- **Pesquise na web** com o Gemini para perguntas sobre acontecimentos atuais.
+- **Ferramentas de Escrita no Notas** utilizam a mesma IA para revisar, reescrever ou resumir textos, destacar pontos importantes ou transformá-los em uma lista ou tabela.
+
+**Privacidade:** o WacOS não possui servidor próprio. Sua pergunta vai diretamente do PC para o serviço escolhido (ou permanece no computador quando você utiliza um modelo local). Sua chave é criptografada pelo Windows (DPAPI) exclusivamente para o seu usuário e nunca é gravada no arquivo de configurações ou no log.
+
+Ative em **Ajustes do Sistema > Apple Intelligence e Siri**: escolha um serviço, insira sua chave e selecione um modelo. Gemini e Groq possuem planos gratuitos suficientes para começar.
+
+## Instalação
+
+1. Baixe o arquivo `WacOS-<date>.zip` na página da [versão mais recente](https://github.com/renzyxx/WacOS/releases/latest).
+2. Extraia o arquivo em qualquer pasta e abra **`WacOSSetup.exe`**: um único aplicativo para instalar, atualizar, modificar e desinstalar o WacOS, seguindo o estilo do instalador do macOS.
+
+O arquivo ZIP da versão inclui estas fontes, sons e cursores (eles não estão no repositório, e o `WacOSSetup.exe` não os baixa). Esses recursos pertencem aos seus respectivos proprietários e não estão cobertos pela licença do WacOS (consulte [Licença](#licença)):
+
+- **SF Pro e SF Mono**, fontes da Apple (pasta `fontes`; aplica-se a [licença da Apple](https://developer.apple.com/fonts/)). A instalação é opcional.
+- **Sons de alertas e da interface do macOS**, da Apple (pasta `sons`). Eles são copiados junto com o WacOS.
+- **Cursor do macOS Tahoe**, criado por [jimmyxd2 no DeviantArt](https://www.deviantart.com/jimmyxd2/art/1208233550) (pasta `cursor`). Opcional e oferecido somente com a versão completa do WacOS.
+- **Cursor do Mac OS X**, de um pacote de RaZcaL inSIDe que atribui à Apple a provável autoria original (pasta `cursor-leopard`). Ele é copiado junto com o WacOS e utilizado pelo tema Leopard.
+
+Caso as fontes, os sons de alerta ou o cursor do Tahoe estejam ausentes (por exemplo, em um pacote compilado por você), o antigo `instalar.cmd` pode oferecer a opção de obtê-los: as fontes diretamente da Apple (extraídas com 7-Zip e instaladas pelo `winget`, se necessário), 14 sons de alerta de [extratone/macOSsystemsounds](https://github.com/extratone/macOSsystemsounds) e o cursor pela página do DeviantArt, cujo download deve ser feito por você.
+
+O WacOS é instalado somente para o seu usuário (sem exigir direitos de administrador) em `%LOCALAPPDATA%\Programs\WacOS`. Tudo o que ele altera é registrado em `instalacao.log`, nesse diretório. Para desinstalar, acesse **Configurações > Aplicativos > Aplicativos instalados > WacOS > Desinstalar** (ou abra novamente o `WacOSSetup.exe`). Os antigos scripts `instalar.cmd` e `desinstalar.cmd` continuam disponíveis no pacote para uso avançado.
+
+- Encerrar o WacOS: `Ctrl+Alt+Shift+F12`. Saída de emergência (restaura o Explorer): `Ctrl+Alt+Shift+F11`.
+
+### Usar somente os aplicativos ou somente as barras de título
+
+Já possui sua própria configuração? O `WacOSSetup.exe` permite escolher o que instalar:
+
+1. **WacOS completo** (barra de menus, Dock, Finder...).
+2. **Somente os aplicativos escolhidos** (Finder, Notas, Calculadora, Música, Pré-Visualização...): os atalhos são adicionados a uma pasta **WacOS** no menu Iniciar. Cada aplicativo desenha sua própria barra de título Mac, com ou sem o shell em execução.
+3. **Somente as barras de título Mac** nos demais aplicativos: `WacOSTitleBars.exe`, com opção de inicialização ao entrar no Windows. Desative com `WacOSTitleBars.exe --sair` (ele também é encerrado quando o shell completo é iniciado e assume o controle).
+4. **Aplicativos + barras de título**.
+
+As opções 2 a 4 mantêm a barra de tarefas do Windows, o Explorer e suas pastas como estão, e não adicionam a tarefa de inicialização do shell. Os temas e o idioma são lidos dos Ajustes do Sistema (instale esse aplicativo para alterá-los). Os aplicativos que nunca devem receber a barra de título Mac devem ser adicionados, um por linha, em `%APPDATA%\Shell\janelas-excluidas.txt`.
+
+Os aplicativos integrados mantêm os cantos das janelas desenhados pelo Windows, para que modificações que alteram o raio dos cantos (como os cantos arredondados do Windhawk) não deixem mais uma moldura quadrada ao redor deles.
+
+## Atualizações
+
+Novas versões são publicadas como releases numeradas (`build-N`). Em **Ajustes do Sistema > Geral > Atualização de Software**, o WacOS consulta o GitHub automaticamente, mostra a versão instalada, a versão mais recente e os commits que ainda não estão presentes na sua instalação. A opção **Atualizar Agora** abre o `WacOSSetup.exe`, que baixa o novo pacote, verifica seu SHA-256 em comparação com o valor publicado pelo GitHub e instala a atualização (somente programas, ícones e sons são substituídos; suas configurações são preservadas).
+
+O GitHub Actions verifica se cada commit enviado para `main` pode ser compilado.
+
+## É seguro?
+
+É uma pergunta justa para qualquer programa que substitua a barra de tarefas. Você não precisa confiar apenas no autor:
+
+- **Código-fonte disponível.** Todos os arquivos estão neste repositório: você pode ler o código e compilar o projeto por conta própria (consulte [Compilação](#compilação)).
+- **Rede.** Sem telemetria e sem contas. Estes são os endereços acessados pelo próprio código do WacOS:
+  - `api.open-meteo.com`: previsão do tempo. Recebe as coordenadas das cidades escolhidas por você (até que uma cidade seja selecionada, utiliza uma cidade estimada a partir do fuso horário do Windows). O shell consulta o serviço na inicialização e a cada 15 minutos, mesmo com o widget oculto (exceto no modo "Somente Dock e barra de menus"); o aplicativo Clima faz o mesmo enquanto está aberto.
+  - `geocoding-api.open-meteo.com`: pesquisa de cidades no Clima e no Relógio. Recebe o nome pesquisado e o idioma utilizado.
+  - `date.nager.at`: feriados nacionais no Calendário (ativado por padrão; desmarque esse calendário para interromper as consultas). Recebe o ano e o código do país definidos pela região do Windows.
+  - `suggestqueries.google.com`: sugestões do Spotlight. Recebe o que você digita no Spotlight e seu idioma, conforme você escreve. Está ativado por padrão; `spotlight_google=0` em `%APPDATA%\Shell\ajustes.txt` desativa o recurso.
+  - `api.github.com`, com `github.com` como alternativa: atualizações. O shell verifica 90 segundos após iniciar e a cada 6 horas (desativar a notificação de atualização não interrompe a verificação). A página Atualização de Software e o `WacOSSetup.exe` também fazem consultas durante a atualização. A verificação também envia o identificador do commit instalado para listar o que mudou.
+  - `github.com` e `release-assets.githubusercontent.com`: download do pacote quando você escolhe atualizar.
+  - Somente no antigo `instalar.cmd`, para arquivos ausentes do pacote e apenas se você autorizar: `devimages-cdn.apple.com` (fontes), `raw.githubusercontent.com` (sons) e `winget`, que utiliza seus próprios endereços (7-Zip, para extrair as fontes).
+
+  Links, pesquisas na web e a página do cursor no DeviantArt são abertos no navegador. Execute o WacOS atrás de um firewall como simplewall ou GlassWire para monitorar as conexões por conta própria (a verificação de atualizações aparece como `powershell.exe`).
+- **O que é instalado.** Uma tarefa agendada para iniciar quando você entrar no Windows, com permissões normais de usuário. Nenhum serviço, nenhum driver e nenhuma permissão de administrador. A desinstalação (Aplicativos instalados > WacOS) remove tudo.
+- **Os jogos são preservados.** A DLL das barras de título nunca é carregada em jogos, inicializadores ou programas com sistemas antitrapaça: ela verifica a pasta do programa, arquivos da engine e do sistema antitrapaça próximos ao executável, classes de janela da engine e tela cheia exclusiva. Mesmo que seja carregada, recusa-se a iniciar dentro de um jogo. Adicione suas próprias exceções em `%APPDATA%\Shell\janelas-excluidas.txt`.
+- **Antivírus.** Um shell precisa executar ações que podem parecer suspeitas para sistemas heurísticos: iniciar junto com o Windows, utilizar hooks de teclado e mouse para atalhos como a tecla Win e os Cantos Ativos, além de carregar sua DLL de barras de título em outros aplicativos. O pacote build-12 apresenta [1/66 no VirusTotal](https://www.virustotal.com/gui/file/310ab4f16824500a8d77225fef66a62e499c32d6d5484a8752b119b7f24e67f3), uma única detecção heurística baseada em IA. Os scripts de instalação são arquivos PowerShell simples que podem ser lidos: não há C# incorporado, janelas ocultas ou código disfarçado, e o atualizador verifica o SHA-256 do pacote em comparação com o valor publicado pelo GitHub. Caso o Microsoft Defender sinalize o programa no seu PC, trata-se de um falso positivo já reportado à Microsoft; abra uma [issue](https://github.com/renzyxx/WacOS/issues) informando o nome da ameaça.
+
+## Testes e estabilidade
+
+O WacOS é testado no PC do autor após cada alteração, e o [registro de mudanças](docs/registro-mudancas.txt) (em português) documenta o que foi modificado, como foi verificado e o que não foi testado. Alguns dos procedimentos:
+
+- **Teste de estresse** (15 a 30 minutos): programas de teste abrem, minimizam e fecham janelas continuamente enquanto o Mission Control e o Launchpad são abertos e fechados. A memória do shell, os handles e os objetos GDI/USER são monitorados. Esses recursos aumentam e diminuem de acordo com o uso do Mission Control, em vez de crescerem continuamente; os aplicativos de teste com a DLL de barras de título permanecem estáveis após mais de 60 ciclos.
+- **Watchdog:** o shell reinicia sozinho quando realmente trava. Um falso alarme durante animações pesadas (que reiniciava um shell ainda funcional) foi identificado no teste de estresse e corrigido: não ocorreram novos reinícios nos testes seguintes.
+- **Animações quadro a quadro:** a animação Genie e as demais animações do compositor são gravadas com Desktop Duplication (uma captura de tela comum não consegue registrá-las) e verificadas quadro a quadro. Foi assim que o efeito "pixelado" da animação Genie foi associado aos recortes em degraus e corrigido com recortes trapezoidais.
+- **Barras de título entre atualizações:** as barras de título são carregadas por meio de um pequeno carregador fixo (`WacOSGancho.dll`), evitando que atualizar ou reiniciar o WacOS consuma os slots limitados de hooks do Windows. Isso foi testado substituindo a DLL das barras de título três vezes durante uma única sessão de usuário.
+- **Investigação de travamentos:** uma thread de monitoramento registra em `shell.log` a pilha de chamadas de qualquer bloqueio da interface com duração igual ou superior a 1 segundo. O shell e a DLL das barras de título nunca aguardam o disco, o Registro ou outro processo na thread de uma janela. Em um disco ocupado, isso reduziu travamentos de vários segundos no shell e em aplicativos como Discord e Chrome para apenas alguns milissegundos.
+- **Bugs relatados** no Reddit, GitHub e Discord são reproduzidos sempre que possível (vídeos ajudam bastante!).
+
+Limitações conhecidas: aplicativos executados como administrador não podem receber a barra de título Mac quando o shell não está elevado; além disso, a primeira instalação do build-18 ou posterior exige sair da sessão do Windows uma vez para que o novo carregador das barras de título assuma o controle.
+
+## Roadmap
+
+- **Dynamic Island**: mais atividades (inspiradas no [Atoll](https://github.com/Ebullioscopic/Atoll); nenhum código foi copiado).
+- **Releases assinadas**, para evitar que heurísticas de antivírus sinalizem os scripts do instalador.
+- Tem alguma ideia? [Abra uma issue](https://github.com/renzyxx/WacOS/issues).
+
+## Apoie o projeto
+
+O WacOS é gratuito e desenvolvido no tempo livre do autor. Se você gosta do projeto, um café ajuda bastante e contribui para manter as atualizações ☕
+
+<a href="https://buymeacoffee.com/renzyx"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Compre um café para mim" height="50"></a>
+
+Adicionar uma estrela ao repositório e compartilhar o projeto também ajuda.
+
+## Compilação
+
+É necessário ter o Visual Studio 2022 (ou Build Tools 2022) com a carga de trabalho de desenvolvimento em C++.
+
+```text
+build.cmd            everything
+build.cmd shell      somente o shell (WacOSShell.exe: barra de menus, Dock, Spotlight...)
+build.cmd finder     somente o Finder
+build.cmd janelas    barras de título Mac para outros aplicativos (WacOSWindow.dll e seu carregador
+                     fixo WacOSGancho.dll, versões de 32 e 64 bits, e WacOSTitleBars.exe)
+build.cmd titulos    somente WacOSTitleBars.exe (barras de título sem o shell)
+tools\empacotar.ps1  pacote de instalação (dist\WacOS-<date>.zip)
+```
+
+## Estrutura
+
+- `src/shell`: o shell (barra de menus, Dock, Spotlight, Central de Controle, Mission Control, Liquid Glass...).
+- `src/finder`, `src/ajustes` (Ajustes do Sistema), `src/monitor` (Monitor de Atividade) e os demais aplicativos em `src/*`.
+- `src/janelas`: barras de título Mac injetadas nas janelas de outros aplicativos (`gancho.cpp` é o carregador fixo usado pelos hooks do Windows; ele carrega a DLL atual `macjanela.cpp`); `src/titulos`: barras de título sem o shell.
+- `src/menu`: menus de contexto sobre as extensões reais do shell do Windows.
+- `src/comum`: código compartilhado (nomes, idioma, vidro e sombras).
+- `instalador`: scripts de instalação, atualização e desinstalação. `tools`: ferramentas de compilação e empacotamento.
+- `icones`: pacotes de ícones (Sequoia, Tahoe) e SF Symbols.
+
+## Desempenho
+
+Medições realizadas no PC do autor (i9-14900K, RTX 3070 Ti, 3440×1440 a 174 Hz). Em repouso, o shell utiliza aproximadamente 1% de um núcleo da CPU e nenhum tempo de GPU; com um jogo em primeiro plano (Modo de Jogo ativado), utiliza cerca de 2% de um núcleo e nenhum tempo de GPU. Memória: aproximadamente 350 a 500 MB para o shell (a maior parte corresponde ao índice de arquivos do Spotlight), além de cerca de 100 MB para o Finder oculto, que permite abrir janelas do Finder instantaneamente. As animações são executadas no ritmo de atualização da tela, e não por temporizadores. Quando o sistema está ocioso, nada fica fazendo consultas periódicas. Minimizar uma janela exige cerca de 55 ms de preparação (captura da janela, níveis de detalhe e aproximadamente 400 recortes animados) antes de a animação Genie começar; o restante é executado pela GPU no compositor do Windows.
+
+Em notebooks com duas GPUs, configure o `WacOSShell.exe` como **Alto desempenho** em Configurações do Windows > Sistema > Tela > Elementos gráficos. Caso as animações ainda apresentem travamentos, Ajustes do Sistema > Aparência > Transparência e Efeitos > **Reduzir transparência** desativa o desfoque do Liquid Glass, o efeito de maior custo.
+
+## Licença
+
+**O WacOS disponibiliza seu código-fonte, mas não é open source.** Copyright (c) 2026 renzyxx, todos os direitos reservados. 
+Consulte [LICENSE](LICENSE) para ver os termos completos.
+
+- ✅ Você pode ler o código, compilar e executar o WacOS em seus próprios computadores para uso pessoal e enviar pull requests.
+- ❌ Você não pode copiar o código (ou partes dele) para outro projeto, redistribuir o WacOS (reuploads, espelhos, pacotes redistribuídos ou versões modificadas) ou utilizá-lo comercialmente sem autorização por escrito.
+
+Quer utilizar algum recurso do WacOS em seu próprio projeto ou realizar uma adaptação? Abra uma issue e solicite autorização primeiro.
+
+Os ícones, fontes, sons e papéis de parede da Apple, assim como os pacotes de ícones e cursores de terceiros incluídos no pacote de lançamento, não estão cobertos pela licença: pertencem aos seus respectivos proprietários e são incluídos somente para uso pessoal. Um mod do Windhawk em `docs/windhawk/bloqueio-sequoia/` deriva de código licenciado sob GPL-3.0 e mantém essa licença.
+
+## Observação
+
+Apple, macOS, Finder e nomes e ícones relacionados pertencem à Apple Inc. Este é um projeto pessoal e não comercial, sem vínculo ou afiliação com a Apple. Os ícones, fontes e sons incluídos destinam-se somente ao uso pessoal.
+
+</details>
