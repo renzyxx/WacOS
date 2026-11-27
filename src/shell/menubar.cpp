@@ -943,11 +943,12 @@ void Render() {
     // entrada, Wi-Fi, bateria, som, Bluetooth, ícones fixados dos apps e a setinha dos guardados.
     // Cada item é o símbolo com 10 pt de cada lado (no Mac fica um a cada ~38 pt).
     float r = W - 10;
-    auto slot = [&](float iconW, Kind k, int i) {  // reserva o espaço e devolve a caixa do símbolo
-        float w = iconW + 2 * PAD;
+    auto slot = [&](float iconW, Kind k, int i, float rightInset = -1.f) {  // reserva o espaço e devolve a caixa do símbolo
+        if (rightInset < 0) rightInset = PAD;
+        float w = iconW + PAD + rightInset;
         if (r - w < limD) return D2D1::RectF(-1000, 0, -1000 + iconW, H);  // o Dock ocupa o lugar: fica de fora (nem clique)
         add(D2D1::RectF(r - w, 0, r, H), k, i);
-        D2D1_RECT_F box = D2D1::RectF(r - w + PAD, 0, r - PAD, H);
+        D2D1_RECT_F box = D2D1::RectF(r - w + PAD, 0, r - rightInset, H);
         r -= w;
         br->SetColor(litNow ? D2D1::ColorF(1, 1, 1) : fgc);
         return box;
@@ -1055,10 +1056,11 @@ void Render() {
         std::wstring percent;
         float width;
     };
-    constexpr float iconWidth = 14, iconGap = 3, deviceGap = 8, bluetoothGap = 6;
+    constexpr float iconWidth = 14, iconGap = 3, deviceGap = 7, bluetoothGap = 4;
     std::vector<BatteryIndicator> batteries;
     float btWidth = showBluetooth ? 9.f : 0.f;
     const auto selected = shell::Setting(L"barra_baterias_bt", L"");
+    const float btRightInset = !g_hits.empty() && g_hits.back().kind == K_INPUT ? std::min(PAD, 2.f) : PAD;
     if (!selected.empty()) {
         for (const auto& device : central::BluetoothBatteries()) {
             if (selected.find(L"|" + std::to_wstring(device.address) + L"|") == std::wstring::npos) continue;
@@ -1078,18 +1080,22 @@ void Render() {
             } else if (name.find(L"phone") != std::wstring::npos || name.find(L"galaxy") != std::wstring::npos) {
                 symbol = nullptr;
                 fallback = L"\uE8EA";
+            } else if (name.find(L"keyboard") != std::wstring::npos) {
+                symbol = L"keyboard.fill";
+            } else if (name.find(L"mouse") != std::wstring::npos) {
+                symbol = L"computermouse.fill";
             }
             auto percent = std::to_wstring(device.percent) + L"%";
             float width = iconWidth + iconGap + ui::TextWidth(tfN, percent) + 1;
             float gap = batteries.empty() ? (showBluetooth ? bluetoothGap : 0.f) : deviceGap;
-            if (r - btWidth - gap - width - 2 * PAD < std::max(limD, leftEnd)) continue;
+            if (r - btWidth - gap - width - PAD - btRightInset < std::max(limD, leftEnd)) continue;
             btWidth += gap + width;
             batteries.push_back({ symbol, fallback, std::move(percent), width });
         }
     }
     if (btWidth > 0) {
         // O rádio e as baterias abrem o mesmo menu e compartilham a mesma área de clique.
-        auto group = slot(btWidth, K_BT, 0);
+        auto group = slot(btWidth, K_BT, 0, batteries.empty() ? PAD : btRightInset);
         float cursor = group.left;
         if (showBluetooth) {
             auto bx = D2D1::RectF(cursor, 0, cursor + 9, H);
