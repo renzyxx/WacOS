@@ -1541,6 +1541,8 @@
 { L"Reto", L"Square" },
 { L"Pílula", L"Pill" },
 { L"Cor do vidro", L"Glass color" },
+{ L"Fundo de vidro", L"Glass background" },
+{ L"Deixa a ilha com transparência em vidro (Liquid Glass ou fosco), como o Dock e os outros módulos.", L"Gives the island a translucent glass finish (Liquid Glass or frosted), matching the Dock and other modules." },
 { L"Clara", L"Light" },
 { L"Escura", L"Dark" },
 { L"Opacidade do vidro", L"Glass opacity" },

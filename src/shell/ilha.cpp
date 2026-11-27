@@ -102,9 +102,12 @@ struct Spr {
     }
 };
 
-HWND g_wnd;
+HWND g_wnd, g_back;
 ui::GpuSurface g_s;
 bool g_on, g_notesOn, g_volOn, g_hoverOpen, g_copyOn;
+bool g_glass, g_glassOn, g_inGlass;
+int g_glassCor;         // 0 automática, 1 clara, 2 escura, 3 cor de destaque
+float g_glassOpac = -1; // -1 = padrão do tema; senão 0..1
 bool g_copyFiles;            // o aviso "Copiado" é de arquivos (CF_HDROP)
 bool g_shotClip;             // o aviso da Captura de Tela: copiada (true) ou salva
 DWORD g_copyAt;              // última vez que mostrou (apps que regravam a área de transferência em rajada)
@@ -191,8 +194,40 @@ HitId g_pressHit = H_NONE; int g_pressArg = -1; POINT g_pressPt;
 double g_flashAt; int g_flashClip = -1;  // "Copiado" no item clicado
 
 float Sc() { return ui::Scale(g_wnd); }
-const D2D1_COLOR_F WHITE{ 1, 1, 1, 1 }, GRAY{ 1, 1, 1, 0.55f }, GRAY2{ 1, 1, 1, 0.35f };
+D2D1_COLOR_F WHITE{ 1, 1, 1, 1 }, GRAY{ 1, 1, 1, 0.55f }, GRAY2{ 1, 1, 1, 0.35f };
 const D2D1_COLOR_F ORANGE{ 1.f, 0.62f, 0.04f, 1 }, GREEN{ 0.2f, 0.84f, 0.29f, 1 }, RED{ 1.f, 0.27f, 0.23f, 1 };
+
+bool UseGlass() { return g_glassOn && g_glass; }
+bool GlassDark() {
+    if (!UseGlass()) return true;
+    if (g_glassCor == 1) return false;
+    if (g_glassCor == 2 || g_glassCor == 3) return true;
+    return ui::Dark();
+}
+D2D1_COLOR_F GlassTint() {
+    bool dark = ui::Dark();
+    bool tahoe = liquid::On();
+    D2D1_COLOR_F tint = dark ? D2D1::ColorF(0.13f, 0.14f, 0.15f, 0.45f) : D2D1::ColorF(0.98f, 0.98f, 0.99f, 0.45f);
+    if (tahoe) tint = dark ? D2D1::ColorF(0.28f, 0.28f, 0.29f, 0.39f) : D2D1::ColorF(0.56f, 0.56f, 0.57f, 0.39f);
+    if (g_glassCor == 1) tint = D2D1::ColorF(0.97f, 0.97f, 0.98f, tint.a);
+    else if (g_glassCor == 2) tint = D2D1::ColorF(0.10f, 0.10f, 0.11f, tint.a);
+    else if (g_glassCor == 3) { D2D1_COLOR_F ac = ui::Accent(); tint = D2D1::ColorF(ac.r, ac.g, ac.b, tint.a); }
+    if (g_glassOpac >= 0) tint.a = g_glassOpac;
+    return tint;
+}
+D2D1_COLOR_F InkAlpha(float a) {
+    return GlassDark() ? D2D1::ColorF(1, 1, 1, a) : D2D1::ColorF(0, 0, 0, a);
+}
+LRESULT CALLBACK BackProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+    if (m == WM_NCHITTEST) return HTTRANSPARENT;
+    return DefWindowProcW(h, m, w, l);
+}
+void ClearSurface() {
+    if (!g_wnd || !g_s.swap) return;
+    float sc = Sc();
+    if (ui::GpuBegin(g_s, (int)std::lround(WMAX * sc), (int)std::lround(HMAX * sc), sc)) ui::GpuEnd(g_s);
+}
 
 void Update();
 void Paint();
@@ -950,6 +985,11 @@ void Place() {
     int w = (int)std::lround(WMAX * sc), h = (int)std::lround(HMAX * sc);
     int x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - w) / 2;
     SetWindowPos(g_wnd, HWND_TOPMOST, x, mi.rcMonitor.top, w, h, SWP_NOACTIVATE | (g_shown ? 0 : SWP_NOREDRAW));
+    if (g_back) {
+        UINT fl = SWP_NOACTIVATE | (g_shown && UseGlass() && IsWindowVisible(g_back) ? 0 : SWP_NOREDRAW);
+        SetWindowPos(g_back, g_wnd, x, mi.rcMonitor.top, w, h, fl);
+        if (!g_shown || !UseGlass()) ShowWindow(g_back, SW_HIDE);
+    }
 }
 
 void StartFrames() {
@@ -990,8 +1030,15 @@ void Update() {
         g_shown = true;
         Paint();
         ShowWindow(g_wnd, SW_SHOWNOACTIVATE);
+        if (g_back) {
+            if (UseGlass()) SetWindowPos(g_back, g_wnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            else ShowWindow(g_back, SW_HIDE);
+        }
     }
-    if (g_shown) SetWindowPos(g_wnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);  // acima da barra de menus
+    if (g_shown) {
+        SetWindowPos(g_wnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);  // acima da barra de menus
+        if (g_back && UseGlass()) SetWindowPos(g_back, g_wnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
     if (retarget || now - g_modeAt < 1) StartFrames();
     UpdateTimers();
 }
@@ -1070,10 +1117,10 @@ void DrawArt(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F r, fl
         if (gg) { dc->PopLayer(); gg->Release(); }
         return;
     }
-    br->SetColor(D2D1::ColorF(1, 1, 1, 0.14f));
+    br->SetColor(InkAlpha(0.14f));
     dc->FillRoundedRectangle(D2D1::RoundedRect(r, rad, rad), br);
     float s = r.right - r.left;
-    Sym(dc, br, L"music.note", D2D1::RectF(r.left + s * 0.28f, r.top + s * 0.25f, r.right - s * 0.28f, r.bottom - s * 0.25f), D2D1::ColorF(1, 1, 1, 0.6f));
+    Sym(dc, br, L"music.note", D2D1::RectF(r.left + s * 0.28f, r.top + s * 0.25f, r.right - s * 0.28f, r.bottom - s * 0.25f), InkAlpha(0.6f));
 }
 
 void DrawBars(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F r) {  // 4 barrinhas encostadas à direita de r
@@ -1102,7 +1149,7 @@ D2D1_RECT_F BoxOf(Mode m) {
 }
 
 void DrawProgress(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F tr, float f, D2D1_COLOR_F c) {
-    br->SetColor(D2D1::ColorF(1, 1, 1, 0.2f));
+    br->SetColor(InkAlpha(0.2f));
     float r = (tr.bottom - tr.top) / 2;
     dc->FillRoundedRectangle(D2D1::RoundedRect(tr, r, r), br);
     if (f > 0.001f) {
@@ -1115,7 +1162,7 @@ void CircleBtn(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F r, 
     float cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2, rad = std::min(r.right - r.left, r.bottom - r.top) / 2;
     bool hv = Hover(id, arg);
     if (hv || always) {
-        br->SetColor(D2D1::ColorF(1, 1, 1, (g_pressHit == id ? 0.22f : hv ? 0.13f : 0.08f)));
+        br->SetColor(InkAlpha(g_pressHit == id ? 0.22f : hv ? 0.13f : 0.08f));
         dc->FillEllipse(D2D1::Ellipse({ cx, cy }, rad, rad), br);
     }
 }
@@ -1140,9 +1187,9 @@ D2D1_COLOR_F Accent() {
 // ficha/botão de fundo: preenchimento do tema (+ a borda de vidro no Tahoe/Golden Gate, o verniz no Leopard)
 void Chip(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F r, float rad, float level) {  // level 0 repouso, 1 ponteiro, 2 apertado
     float a = level >= 2 ? 0.22f : level >= 1 ? 0.15f : 0.09f;
-    br->SetColor(D2D1::ColorF(1, 1, 1, a));
+    br->SetColor(InkAlpha(a));
     dc->FillRoundedRectangle(D2D1::RoundedRect(r, rad, rad), br);
-    if (Glassy()) liquid::Rim(dc, r, rad, true, g_theme == TH_GOLDEN ? 0.9f : 0.6f, level >= 1 ? 1.f : 0.f);
+    if (Glassy()) liquid::Rim(dc, r, rad, GlassDark(), g_theme == TH_GOLDEN ? 0.9f : 0.6f, level >= 1 ? 1.f : 0.f);
     else if (g_theme == TH_LEOPARD) {
         br->SetColor(D2D1::ColorF(1, 1, 1, 0.10f));
         dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(r.left + 1, r.top + 1, r.right - 1, (r.top + r.bottom) / 2), std::max(0.f, rad - 1), std::max(0.f, rad - 1)), br);
@@ -1152,7 +1199,7 @@ void Chip(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F r, float
 }
 
 void DrawProgressT(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F tr, float f) {
-    if (g_theme != TH_LEOPARD) { DrawProgress(dc, br, tr, f, D2D1::ColorF(1, 1, 1, 0.92f)); return; }
+    if (g_theme != TH_LEOPARD) { DrawProgress(dc, br, tr, f, InkAlpha(0.92f)); return; }
     // Leopard: trilho escuro afundado e o gel azul com o verniz
     float r = (tr.bottom - tr.top) / 2;
     br->SetColor(D2D1::ColorF(0, 0, 0, 0.55f));
@@ -1359,7 +1406,7 @@ void DrawClip(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F b, f
     if (rola) {  // barrinha de rolagem fina à direita (a roda rola a lista)
         float trackT = y0 + 24, trackB = y0 + CLIP_ROWS * rowH - 2, th = std::max(10.f, (trackB - trackT) * CLIP_ROWS / n);
         float ty = trackT + (trackB - trackT - th) * g_clipTop / std::max(1, n - CLIP_ROWS);
-        br->SetColor(D2D1::ColorF(1, 1, 1, 0.30f));
+        br->SetColor(InkAlpha(0.30f));
         dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(R - 3, ty, R, ty + th), 1.5f, 1.5f), br);
     }
     for (int i = g_clipTop; i < n && i < g_clipTop + CLIP_ROWS; i++, y += rowH) {
@@ -1399,8 +1446,8 @@ void DrawShelf(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, D2D1_RECT_F b, 
         float dash[] = { 4, 3 };
         if (f) { f->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND, 10, D2D1_DASH_STYLE_CUSTOM), dash, 2, &ss); f->Release(); }
         float rr = g_theme == TH_LEOPARD ? 6.f : 14.f;
-        if (g_dragIn) { br->SetColor(D2D1::ColorF(1, 1, 1, 0.08f)); dc->FillRoundedRectangle(D2D1::RoundedRect(box, rr, rr), br); }
-        br->SetColor(D2D1::ColorF(1, 1, 1, g_dragIn ? 0.6f : 0.25f));
+        if (g_dragIn) { br->SetColor(InkAlpha(0.08f)); dc->FillRoundedRectangle(D2D1::RoundedRect(box, rr, rr), br); }
+        br->SetColor(InkAlpha(g_dragIn ? 0.6f : 0.25f));
         dc->DrawRoundedRectangle(D2D1::RoundedRect(box, rr, rr), br, 1.5f, ss);
         if (ss) ss->Release();
         float cy = (box.top + box.bottom) / 2;
@@ -1630,6 +1677,28 @@ ID2D1PathGeometry* Outline(ID2D1Factory* f, D2D1_RECT_F p, float rb) {
     return g;
 }
 
+// contorno do entalhe moderno (com as orelhas côncavas, sem a borda de cima): para o fio de luz do vidro
+ID2D1PathGeometry* NotchOutline(ID2D1Factory* f, D2D1_RECT_F p, float rt, float rb) {
+    ID2D1PathGeometry* g = nullptr;
+    if (FAILED(f->CreatePathGeometry(&g))) return nullptr;
+    float L = p.left, R = p.right, B = p.bottom;
+    rt = std::clamp(rt, 0.f, (R - L) / 4);
+    rb = std::clamp(rb, 0.f, std::min(std::max(0.f, B - p.top - rt), std::max(0.f, (R - L - 2 * rt) / 2)));
+    ID2D1GeometrySink* s = nullptr;
+    if (FAILED(g->Open(&s)) || !s) { g->Release(); return nullptr; }
+    s->BeginFigure({ L, p.top }, D2D1_FIGURE_BEGIN_HOLLOW);
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ L + rt, p.top }, { L + rt, p.top + rt }));
+    s->AddLine({ L + rt, B - rb });
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ L + rt, B }, { L + rt + rb, B }));
+    s->AddLine({ R - rt - rb, B });
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ R - rt, B }, { R - rt, B - rb }));
+    s->AddLine({ R - rt, p.top + rt });
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ R - rt, p.top }, { R, p.top }));
+    s->EndFigure(D2D1_FIGURE_END_OPEN);
+    s->Close(); s->Release();
+    return g;
+}
+
 D2D1_RECT_F ShapeRect() {
     float w = std::max(1.f, g_w.x), h = std::max(1.f, g_h.x), top = TopOff();
     return D2D1::RectF((WMAX - w) / 2, top, (WMAX + w) / 2, top + h);
@@ -1654,80 +1723,140 @@ void Paint() {
         if (ID2D1DeviceContext* gdc = ui::Gpu()) g_art = ui::Bitmap(gdc, g_m.aw, g_m.ah, g_m.art);
     }
     float sc = Sc();
-    auto* dc = ui::GpuBegin(g_s, (int)std::lround(WMAX * sc), (int)std::lround(HMAX * sc), sc);
-    if (!dc) return;
-    ID2D1SolidColorBrush* br = nullptr;
-    dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), &br);
-    if (!br) { ui::GpuEnd(g_s); return; }
+    int wpx = (int)std::lround(WMAX * sc), hpx = (int)std::lround(HMAX * sc);
     D2D1_RECT_F p = ShapeRect();
     float alpha = std::clamp(g_a.x, 0.f, 1.f);
-    ID2D1Factory* f = nullptr; dc->GetFactory(&f);
-    ID2D1Geometry* geo = f ? Shape(f, p, std::max(0.f, g_rt.x), std::max(0.f, g_rb.x)) : nullptr;
-    float rad = std::min({ std::max(0.f, g_rb.x), (p.bottom - p.top) / 2, (p.right - p.left) / 2 });
+    float rt = std::max(0.f, g_rt.x), rb = std::max(0.f, g_rb.x);
+    float rad = std::min({ rb, (p.bottom - p.top) / 2, (p.right - p.left) / 2 });
     const bool pill = !Notch();
     const bool leoNotch = Notch() && g_theme == TH_LEOPARD;
+    const bool wantGlass = UseGlass();
+
+    ID2D1DeviceContext* dc = nullptr;
+    g_inGlass = false;
+    if (wantGlass) {
+        backdrop::Piece pc{};
+        pc.r = D2D1::RectF(p.left * sc, p.top * sc, p.right * sc, p.bottom * sc);
+        pc.radius = rad * sc;
+        if (Notch() && !leoNotch) {
+            pc.notch = true;
+            pc.notchRt = rt * sc;
+            pc.notchRb = rb * sc;
+        }
+        backdrop::SetPieces(g_back, (float)wpx, (float)hpx, { pc }, GlassTint(), 12.f);
+        backdrop::Fade(g_back, alpha, 1.f, 0, 0);
+        dc = backdrop::ContentBegin(g_back, wpx, hpx, sc);
+        if (dc) g_inGlass = true;
+    }
+    if (!dc) dc = ui::GpuBegin(g_s, wpx, hpx, sc);
+    if (!dc) return;
+
+    const bool dk = !g_inGlass || GlassDark();
+    WHITE = dk ? D2D1::ColorF(1, 1, 1, 1) : D2D1::ColorF(0.08f, 0.08f, 0.09f, 0.95f);
+    GRAY  = dk ? D2D1::ColorF(1, 1, 1, 0.55f) : D2D1::ColorF(0.08f, 0.08f, 0.09f, 0.58f);
+    GRAY2 = dk ? D2D1::ColorF(1, 1, 1, 0.35f) : D2D1::ColorF(0.08f, 0.08f, 0.09f, 0.36f);
+
+    D2D1_MATRIX_3X2_F base;
+    dc->GetTransform(&base);
+    const float la = g_inGlass ? 1.f : alpha;  // no vidro, backdrop::Fade já aplica o alfa na árvore toda
+
+    ID2D1SolidColorBrush* br = nullptr;
+    dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), &br);
+    if (!br) { if (g_inGlass) backdrop::ContentEnd(g_back); else ui::GpuEnd(g_s); return; }
+    ID2D1Factory* f = nullptr; dc->GetFactory(&f);
+    ID2D1Geometry* geo = f ? Shape(f, p, rt, rb) : nullptr;
+
+    // No vidro, a sombra não pode escurecer o miolo transparente: recorta o lado de fora de `geo`
+    ID2D1PathGeometry* outerClip = nullptr;
+    if (g_inGlass && f && geo) {
+        ID2D1RectangleGeometry* full = nullptr;
+        if (SUCCEEDED(f->CreateRectangleGeometry(D2D1::RectF(0, 0, WMAX, HMAX), &full))) {
+            if (SUCCEEDED(f->CreatePathGeometry(&outerClip))) {
+                ID2D1GeometrySink* os = nullptr;
+                if (SUCCEEDED(outerClip->Open(&os))) {
+                    full->CombineWithGeometry(geo, D2D1_COMBINE_MODE_EXCLUDE, nullptr, os);
+                    os->Close(); os->Release();
+                } else { outerClip->Release(); outerClip = nullptr; }
+            }
+            full->Release();
+        }
+    }
+    if (outerClip) dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), outerClip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE), nullptr);
     if (leoNotch && alpha > 0.01f && geo) {
         // sombra do Leopard embaixo do painel (os menus e HUDs do 10.5 têm sombra larga e macia)
         for (int i = 5; i >= 1; i--) {
             float e = i * 1.4f;
-            D2D1_MATRIX_3X2_F old; dc->GetTransform(&old);
-            dc->SetTransform(D2D1::Matrix3x2F::Translation(0, e) * old);
-            br->SetColor(D2D1::ColorF(0, 0, 0, 0.06f * alpha * (6 - i) / 5));
+            dc->SetTransform(D2D1::Matrix3x2F::Translation(0, e) * base);
+            br->SetColor(D2D1::ColorF(0, 0, 0, 0.06f * la * (6 - i) / 5));
             dc->DrawGeometry(geo, br, e * 1.6f);
             dc->FillGeometry(geo, br);
-            dc->SetTransform(old);
+            dc->SetTransform(base);
+        }
+    } else if (g_inGlass && Notch() && alpha > 0.01f && geo) {
+        // sombra suave fora do entalhe de vidro (separa sobre a barra de menus e fundos claros)
+        for (int i = 3; i >= 1; i--) {
+            float e = i * 1.3f;
+            dc->SetTransform(D2D1::Matrix3x2F::Translation(0, e * 0.7f) * base);
+            br->SetColor(D2D1::ColorF(0, 0, 0, 0.045f * la * (4 - i) / 3));
+            dc->DrawGeometry(geo, br, e * 1.6f);
+            dc->FillGeometry(geo, br);
+            dc->SetTransform(base);
         }
     }
     if (pill && alpha > 0.01f) {
         // sombra suave em volta da pílula (anéis cada vez mais largos e mais fracos); no Leopard, a do HUD, mais forte
-        float k = g_theme == TH_LEOPARD ? 1.6f : 1.f;
+        float k = g_theme == TH_LEOPARD ? 1.6f : g_inGlass ? 0.75f : 1.f;
         for (int i = 4; i >= 1; i--) {
             float e = i * 1.6f;
-            br->SetColor(D2D1::ColorF(0, 0, 0, 0.07f * k * alpha * (5 - i) / 4));
+            br->SetColor(D2D1::ColorF(0, 0, 0, 0.07f * k * la * (5 - i) / 4));
             dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(p.left - e, p.top - e * 0.5f, p.right + e, p.bottom + e * 1.3f), rad + e, rad + e), br);
         }
     }
-    dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), geo, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), alpha), nullptr);
-    // o corpo: o notch é sempre preto; a pílula muda com o tema
-    D2D1_COLOR_F fill = D2D1::ColorF(0, 0, 0, 1);
-    if (pill && Glassy()) fill = D2D1::ColorF(0.055f, 0.055f, 0.065f, 0.95f);
-    if (pill && g_theme == TH_LEOPARD) fill = D2D1::ColorF(0.10f, 0.10f, 0.11f, 0.90f);
-    br->SetColor(fill);
-    if (leoNotch) {
-        // grafite do HUD: degradê de cima (mais claro) para baixo, e o verniz Aqua na faixa da barra de menus
-        ID2D1GradientStopCollection* gs = nullptr;
-        D2D1_GRADIENT_STOP st[] = { { 0, D2D1::ColorF(0.24f, 0.24f, 0.26f, 0.96f) }, { 0.22f, D2D1::ColorF(0.13f, 0.13f, 0.14f, 0.95f) }, { 1, D2D1::ColorF(0.07f, 0.07f, 0.08f, 0.95f) } };
-        dc->CreateGradientStopCollection(st, 3, &gs);
-        ID2D1LinearGradientBrush* lg = nullptr;
-        if (gs) dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties({ 0, p.top }, { 0, std::max(p.top + g_barPt * 1.4f, p.bottom) }), gs, &lg);
-        if (lg) { dc->FillRectangle(D2D1::RectF(p.left, p.top - 1, p.right, p.bottom), lg); lg->Release(); }
-        else dc->FillRectangle(D2D1::RectF(p.left, p.top - 1, p.right, p.bottom), br);
-        if (gs) gs->Release();
-        float band = std::min(g_barPt, p.bottom - p.top);
-        br->SetColor(D2D1::ColorF(1, 1, 1, 0.11f));
-        dc->FillRectangle(D2D1::RectF(p.left, p.top, p.right, p.top + band / 2), br);  // verniz: metade de cima da faixa, corte nítido
-        if (p.bottom - p.top > g_barPt + 6) {  // aberto: a faixa vira a barra de título do HUD, com o filete embaixo
-            br->SetColor(D2D1::ColorF(0, 0, 0, 0.55f));
-            dc->FillRectangle(D2D1::RectF(p.left, p.top + band, p.right, p.top + band + 1), br);
-            br->SetColor(D2D1::ColorF(1, 1, 1, 0.09f));
-            dc->FillRectangle(D2D1::RectF(p.left, p.top + band + 1, p.right, p.top + band + 2), br);
-        }
-    } else dc->FillRectangle(D2D1::RectF(p.left, p.top - 1, p.right, p.bottom), br);
-    if (pill) {
-        if (g_theme == TH_LEOPARD) {
-            // o verniz do HUD do 10.5: metade de cima mais clara, com corte nítido
-            float mid = p.top + std::min(11.f, (p.bottom - p.top) / 2);
-            br->SetColor(D2D1::ColorF(1, 1, 1, 0.13f));
-            dc->FillRectangle(D2D1::RectF(p.left, p.top, p.right, mid), br);
-        } else {
-            float strength = g_theme == TH_GOLDEN ? 0.18f : g_theme == TH_TAHOE ? 0.14f : 0.10f;
+    if (outerClip) { dc->PopLayer(); outerClip->Release(); }
+
+    dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), geo, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), la), nullptr);
+    if (!g_inGlass) {
+        // o corpo: o notch é sempre preto; a pílula muda com o tema
+        D2D1_COLOR_F fill = D2D1::ColorF(0, 0, 0, 1);
+        if (pill && Glassy()) fill = D2D1::ColorF(0.055f, 0.055f, 0.065f, 0.95f);
+        if (pill && g_theme == TH_LEOPARD) fill = D2D1::ColorF(0.10f, 0.10f, 0.11f, 0.90f);
+        br->SetColor(fill);
+        if (leoNotch) {
+            // grafite do HUD: degradê de cima (mais claro) para baixo, e o verniz Aqua na faixa da barra de menus
             ID2D1GradientStopCollection* gs = nullptr;
-            D2D1_GRADIENT_STOP st[] = { { 0, D2D1::ColorF(1, 1, 1, strength) }, { 1, D2D1::ColorF(1, 1, 1, 0) } };
-            dc->CreateGradientStopCollection(st, 2, &gs);
+            D2D1_GRADIENT_STOP st[] = { { 0, D2D1::ColorF(0.24f, 0.24f, 0.26f, 0.96f) }, { 0.22f, D2D1::ColorF(0.13f, 0.13f, 0.14f, 0.95f) }, { 1, D2D1::ColorF(0.07f, 0.07f, 0.08f, 0.95f) } };
+            dc->CreateGradientStopCollection(st, 3, &gs);
             ID2D1LinearGradientBrush* lg = nullptr;
-            if (gs) dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties({ 0, p.top }, { 0, p.top + std::min(26.f, (p.bottom - p.top) * 0.6f) }), gs, &lg);
-            if (lg) { dc->FillRectangle(p, lg); lg->Release(); }
+            if (gs) dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties({ 0, p.top }, { 0, std::max(p.top + g_barPt * 1.4f, p.bottom) }), gs, &lg);
+            if (lg) { dc->FillRectangle(D2D1::RectF(p.left, p.top - 1, p.right, p.bottom), lg); lg->Release(); }
+            else dc->FillRectangle(D2D1::RectF(p.left, p.top - 1, p.right, p.bottom), br);
             if (gs) gs->Release();
+            float band = std::min(g_barPt, p.bottom - p.top);
+            br->SetColor(D2D1::ColorF(1, 1, 1, 0.11f));
+            dc->FillRectangle(D2D1::RectF(p.left, p.top, p.right, p.top + band / 2), br);  // verniz: metade de cima da faixa, corte nítido
+            if (p.bottom - p.top > g_barPt + 6) {  // aberto: a faixa vira a barra de título do HUD, com o filete embaixo
+                br->SetColor(D2D1::ColorF(0, 0, 0, 0.55f));
+                dc->FillRectangle(D2D1::RectF(p.left, p.top + band, p.right, p.top + band + 1), br);
+                br->SetColor(D2D1::ColorF(1, 1, 1, 0.09f));
+                dc->FillRectangle(D2D1::RectF(p.left, p.top + band + 1, p.right, p.top + band + 2), br);
+            }
+        } else dc->FillRectangle(D2D1::RectF(p.left, p.top - 1, p.right, p.bottom), br);
+        if (pill) {
+            if (g_theme == TH_LEOPARD) {
+                // o verniz do HUD do 10.5: metade de cima mais clara, com corte nítido
+                float mid = p.top + std::min(11.f, (p.bottom - p.top) / 2);
+                br->SetColor(D2D1::ColorF(1, 1, 1, 0.13f));
+                dc->FillRectangle(D2D1::RectF(p.left, p.top, p.right, mid), br);
+            } else {
+                float strength = g_theme == TH_GOLDEN ? 0.18f : g_theme == TH_TAHOE ? 0.14f : 0.10f;
+                ID2D1GradientStopCollection* gs = nullptr;
+                D2D1_GRADIENT_STOP st[] = { { 0, D2D1::ColorF(1, 1, 1, strength) }, { 1, D2D1::ColorF(1, 1, 1, 0) } };
+                dc->CreateGradientStopCollection(st, 2, &gs);
+                ID2D1LinearGradientBrush* lg = nullptr;
+                if (gs) dc->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties({ 0, p.top }, { 0, p.top + std::min(26.f, (p.bottom - p.top) * 0.6f) }), gs, &lg);
+                if (lg) { dc->FillRectangle(p, lg); lg->Release(); }
+                if (gs) gs->Release();
+            }
         }
     }
     // conteúdo: o anterior some em 70 ms enquanto o novo já começa a aparecer (a forma está mudando por baixo)
@@ -1737,39 +1866,56 @@ void Paint() {
         bool open = m == M_OPEN;
         float s = open ? 1.f : 0.92f + 0.08f * a;
         D2D1_RECT_F b = BoxOf(m);
-        dc->SetTransform(D2D1::Matrix3x2F::Scale(s, s, { (b.left + b.right) / 2, b.top + (Notch() ? g_barPt / 2 : PILL_H / 2) }));
+        dc->SetTransform(D2D1::Matrix3x2F::Scale(s, s, { (b.left + b.right) / 2, b.top + (Notch() ? g_barPt / 2 : PILL_H / 2) }) * base);
         if (!open) dc->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), a), nullptr);
         DrawContent(dc, br, m, tm);
         if (!open) dc->PopLayer();
-        dc->SetTransform(D2D1::Matrix3x2F::Identity());
+        dc->SetTransform(base);
     };
     if (t < 70 && g_prev != M_OPEN) layer(g_prev, 1 - (float)(t / 70), 1e9);
     else if (t < 70) layer(g_prev, 1 - (float)(t / 70), 1e9);
     g_hits.clear();
     float delay = g_mode == M_OPEN ? 0.f : (g_prev == M_OPEN || g_prev == M_PEEK) ? 110.f : 40.f;  // fechando: as asas voltam quando a forma pousa
     layer(g_mode, anim::EaseOut(std::clamp((float)((t - delay) / 200), 0.f, 1.f)), t);
-    ID2D1PathGeometry* line = leoNotch && f ? Outline(f, p, std::max(0.f, g_rb.x)) : nullptr;
+    ID2D1PathGeometry* line = leoNotch && f ? Outline(f, p, rb) : nullptr;
     if (line) {  // filete claro por dentro (metade do traço fica dentro do recorte)
         br->SetColor(D2D1::ColorF(1, 1, 1, 0.22f));
         dc->DrawGeometry(line, br, 2);
     }
+    ID2D1PathGeometry* nline = g_inGlass && Notch() && !leoNotch && f ? NotchOutline(f, p, rt, rb) : nullptr;
+    if (nline) {  // fio de luz do vidro acompanhando as orelhas côncavas do entalhe
+        float hi = dk ? (Glassy() ? 0.30f : 0.22f) : (Glassy() ? 0.65f : 0.50f);
+        br->SetColor(D2D1::ColorF(1, 1, 1, hi));
+        dc->DrawGeometry(nline, br, Glassy() ? 2.2f : 1.6f);
+    }
     dc->PopLayer();
     if (line) {  // e o contorno escuro por fora, para o painel não sumir na barra clara
-        br->SetColor(D2D1::ColorF(0, 0, 0, 0.40f * alpha));
+        br->SetColor(D2D1::ColorF(0, 0, 0, 0.40f * la));
         dc->DrawGeometry(line, br, 1);
         line->Release();
     }
+    if (nline) {
+        br->SetColor(D2D1::ColorF(0, 0, 0, (dk ? 0.32f : 0.14f) * la));
+        dc->DrawGeometry(nline, br, 1);
+        nline->Release();
+    }
     if (pill && alpha > 0.01f) {
-        if (Glassy()) liquid::Rim(dc, p, rad, true, g_theme == TH_GOLDEN ? 1.f : 0.8f, 0.35f);
+        if (Glassy()) liquid::Rim(dc, p, rad, dk, g_theme == TH_GOLDEN ? 1.f : 0.8f, g_inGlass ? 0.45f : 0.35f);
         else {
-            br->SetColor(D2D1::ColorF(1, 1, 1, (g_theme == TH_LEOPARD ? 0.32f : 0.13f) * alpha));
+            br->SetColor(D2D1::ColorF(1, 1, 1, (g_theme == TH_LEOPARD ? 0.32f : g_inGlass ? (dk ? 0.26f : 0.55f) : 0.13f) * la));
             dc->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(p.left + 0.5f, p.top + 0.5f, p.right - 0.5f, p.bottom - 0.5f), std::max(0.f, rad - 0.5f), std::max(0.f, rad - 0.5f)), br, 1);
+            if (g_inGlass) {
+                br->SetColor(D2D1::ColorF(0, 0, 0, (dk ? 0.32f : 0.14f) * la));
+                dc->DrawRoundedRectangle(D2D1::RoundedRect(p, rad, rad), br, 0.75f);
+            }
         }
     }
+    dc->SetTransform(base);
     if (geo) geo->Release();
     if (f) f->Release();
     br->Release();
-    ui::GpuEnd(g_s);
+    if (g_inGlass) backdrop::ContentEnd(g_back);
+    else ui::GpuEnd(g_s);
     SetRegion();
 }
 
@@ -1798,6 +1944,7 @@ void Frame() {
         ui::FrameClock(g_wnd, WM_IL_FRAME, false);
         if (g_mode == M_HIDDEN) {
             ShowWindow(g_wnd, SW_HIDE);
+            if (g_back) ShowWindow(g_back, SW_HIDE);
             g_shown = false;
             g_rgn = {};
         }
@@ -2101,6 +2248,9 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         Place();
         if (g_shown) { Update(); Paint(); }
         return 0;
+    case WM_SETTINGCHANGE:
+        if (g_shown && UseGlass() && !g_running) Paint();
+        return 0;
     }
     return DefWindowProcW(h, m, w, l);
 }
@@ -2157,6 +2307,15 @@ bool ilha::Create(HINSTANCE hi) {
                             WS_POPUP, 0, 0, 10, 10, nullptr, nullptr, hi, nullptr);
     if (!g_wnd) return false;
     g_s.hwnd = g_wnd;
+    {
+        WNDCLASSW bc{}; bc.lpfnWndProc = BackProc; bc.hInstance = hi; bc.lpszClassName = L"ShellIlhaFundo";
+        RegisterClassW(&bc);
+        g_back = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+                                 bc.lpszClassName, L"", WS_POPUP, 0, 0, 10, 10, nullptr, nullptr, hi, nullptr);
+        g_glass = g_back && backdrop::Attach(g_back);
+    }
+    apps::ours.push_back(g_wnd);
+    if (g_back) apps::ours.push_back(g_back);
     g_theme = ThemeNow();
     MakeFonts();
     SYSTEM_POWER_STATUS ps{};
@@ -2186,6 +2345,12 @@ void ilha::Reload() {
     g_volOn = shell::Setting(L"ilha_volume", L"1") != L"0";
     g_copyOn = shell::Setting(L"ilha_copiado", L"1") != L"0";
     g_hoverOpen = shell::Setting(L"ilha_passar", L"1") != L"0";
+    bool wasGlass = UseGlass();
+    g_glassOn = shell::Setting(L"ilha_vidro", L"0") == L"1";
+    std::wstring gc = shell::Setting(L"ilha_cor", L"auto");
+    g_glassCor = gc == L"clara" ? 1 : gc == L"escura" ? 2 : gc == L"destaque" ? 3 : 0;
+    std::wstring go = shell::Setting(L"ilha_opacidade", L"");
+    g_glassOpac = go.empty() ? -1.f : std::clamp((float)_wtof(go.c_str()), 0.f, 100.f) / 100.f;
     if (Theme th = ThemeNow(); th != g_theme) { g_theme = th; MakeFonts(); Log(L"ilha: tema %d", (int)th); }
     if (g_on) {
         MediaStart();
@@ -2201,13 +2366,24 @@ void ilha::Reload() {
     if (g_on != was || ns != g_style) Log(L"ilha: %ls (%ls)", g_on ? L"ligada" : L"desligada", st.c_str());
     if (ns != g_style && g_shown) {  // trocou de estilo: some e volta no outro formato
         g_style = ns;
-        ShowWindow(g_wnd, SW_HIDE); g_shown = false; g_rgn = {}; g_mode = M_HIDDEN;
+        ShowWindow(g_wnd, SW_HIDE);
+        if (g_back) ShowWindow(g_back, SW_HIDE);
+        g_shown = false; g_rgn = {}; g_mode = M_HIDDEN;
     }
     g_style = ns;
+    bool nowGlass = UseGlass();
+    if (nowGlass != wasGlass) {
+        if (nowGlass) ClearSurface();
+        else if (g_back) ShowWindow(g_back, SW_HIDE);
+    }
     if (!g_volOn && g_hud == HUD_VOL) g_hudOn = false;
     if (!g_notesOn) g_peekOn = false;
     Place();
     Update();
+    if (g_shown) {
+        if (!g_running) Paint();
+        if (g_back && UseGlass()) SetWindowPos(g_back, g_wnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
 }
 
 namespace {
@@ -2256,6 +2432,7 @@ void ApplyFull(bool on) {
         KillTimer(g_wnd, TM_EQ); KillTimer(g_wnd, TM_HOVER); KillTimer(g_wnd, TM_LEAVE);
         if (g_running) { g_running = false; ui::FrameClock(g_wnd, WM_IL_FRAME, false); }
         ShowWindow(g_wnd, SW_HIDE);
+        if (g_back) ShowWindow(g_back, SW_HIDE);
         g_shown = false; g_rgn = {};
         g_mode = g_prev = M_HIDDEN;
         g_openOn = g_hoverIn = false;

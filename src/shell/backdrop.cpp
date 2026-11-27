@@ -22,12 +22,14 @@
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Numerics.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Graphics.h>
 #include <winrt/Windows.Graphics.Effects.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Composition.Desktop.h>
 #include <windows.ui.composition.interop.h>
+#include <windows.graphics.interop.h>
 #include <windows.graphics.effects.interop.h>
 #include <d3d11_4.h>
 #include <dxgi1_4.h>
@@ -299,6 +301,43 @@ void SetLiquidVisible(Entry& e, bool on) {
 
 namespace rg { void Use(Entry& e, bool want); void Redraw(Entry& e); void SetActive(bool on); extern bool active; extern bool semCaptura; }  // vidro real (mais abaixo)
 
+// Geometria de entalhe (Notch da Ilha Dinâmica): orelhas côncavas no topo (rt) e cantos arredondados na base (rb).
+ID2D1PathGeometry* NotchPath(ID2D1Factory* f, D2D1_RECT_F p, float rt, float rb) {
+    ID2D1PathGeometry* g = nullptr;
+    if (!f || FAILED(f->CreatePathGeometry(&g))) return nullptr;
+    float L = p.left, R = p.right, T = p.top, B = p.bottom;
+    rt = std::clamp(rt, 0.f, std::max(0.f, (R - L) / 4));
+    rb = std::clamp(rb, 0.f, std::min(std::max(0.f, B - T - rt), std::max(0.f, (R - L - 2 * rt) / 2)));
+    ID2D1GeometrySink* s = nullptr;
+    if (FAILED(g->Open(&s)) || !s) { g->Release(); return nullptr; }
+    s->BeginFigure({ L, T }, D2D1_FIGURE_BEGIN_FILLED);
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ L + rt, T }, { L + rt, T + rt }));
+    s->AddLine({ L + rt, B - rb });
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ L + rt, B }, { L + rt + rb, B }));
+    s->AddLine({ R - rt - rb, B });
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ R - rt, B }, { R - rt, B - rb }));
+    s->AddLine({ R - rt, T + rt });
+    s->AddQuadraticBezier(D2D1::QuadraticBezierSegment({ R - rt, T }, { R, T }));
+    s->EndFigure(D2D1_FIGURE_END_CLOSED);
+    s->Close(); s->Release();
+    return g;
+}
+
+struct D2DGeoSource : winrt::implements<D2DGeoSource, winrt::Windows::Graphics::IGeometrySource2D, ABI::Windows::Graphics::IGeometrySource2DInterop> {
+    ID2D1Geometry* g = nullptr;
+    explicit D2DGeoSource(ID2D1Geometry* geo) : g(geo) { if (g) g->AddRef(); }
+    ~D2DGeoSource() { if (g) g->Release(); }
+    HRESULT __stdcall GetGeometry(ID2D1Geometry** out) noexcept override {
+        if (!out) return E_POINTER;
+        *out = g;
+        if (g) g->AddRef();
+        return g ? S_OK : E_FAIL;
+    }
+    HRESULT __stdcall TryGetGeometryUsingFactory(ID2D1Factory*, ID2D1Geometry** out) noexcept override {
+        return GetGeometry(out);
+    }
+};
+
 // Sem o vidro real (modo jogo, VM, captura recusada) e com várias peças, o fosco era um só, do tamanho da janela: o
 // Spotlight do Golden Gate virava um retângulo grande em volta da barra e do painel, que deviam flutuar separados
 // (22/11/2026). Aqui cada peça ganha o seu fosco e a sua tinta, recortados nos cantos dela. ativo = false: esconde.
@@ -323,10 +362,23 @@ void PecasSemReal(Entry& e, bool ativo) {
         float pw = pc.r.right - pc.r.left, ph = pc.r.bottom - pc.r.top;
         v.Offset({ pc.r.left, pc.r.top, 0 });
         v.Size({ pw, ph });
-        auto geo = g_comp.CreateRoundedRectangleGeometry();
-        geo.Size({ pw, ph });
-        geo.CornerRadius({ pc.radius, pc.radius });
-        v.Clip(g_comp.CreateGeometricClip(geo));
+        bool clipped = false;
+        if (pc.notch && ui::d2d) {
+            if (ID2D1PathGeometry* pg = NotchPath(ui::d2d, D2D1::RectF(0, 0, pw, ph), pc.notchRt, pc.notchRb)) {
+                try {
+                    auto src = winrt::make<D2DGeoSource>(pg);
+                    v.Clip(g_comp.CreateGeometricClip(g_comp.CreatePathGeometry(wuc::CompositionPath(src))));
+                    clipped = true;
+                } catch (...) {}
+                pg->Release();
+            }
+        }
+        if (!clipped) {
+            auto geo = g_comp.CreateRoundedRectangleGeometry();
+            geo.Size({ pw, ph });
+            geo.CornerRadius({ pc.radius, pc.radius });
+            v.Clip(g_comp.CreateGeometricClip(geo));
+        }
         if (i % 2 == 0) v.Brush(e.blur.Brush());                                     // o fosco
         else v.Brush(g_comp.CreateColorBrush(Col(pt.r, pt.g, pt.b, pt.a)));          // a tinta da peça
         v.IsVisible(true);
@@ -367,7 +419,7 @@ void Apply(Entry& e) {
         // Sem o vidro real (captura de janelas indisponível: VM, área remota) e com uma peça só do tamanho da
         // janela (alertas, progresso): o fosco ganha os cantos e a tinta da peça. Sem isto era um retângulo
         // reto e sem tinta (visto na VM em 11/11/2026).
-        if (!e.real && e.pieces.size() == 1 && !e.pieces[0].goo) {
+        if (!e.real && e.pieces.size() == 1 && !e.pieces[0].goo && !e.pieces[0].notch) {
             const auto& p = e.pieces[0];
             if (p.r.left <= 1 && p.r.top <= 1 && p.r.right >= e.w - 1 && p.r.bottom >= e.h - 1) {
                 e.geo.CornerRadius({ p.radius, p.radius });
@@ -1532,6 +1584,8 @@ void Redraw(Entry& e) {
                 std::vector<D2D1_ELLIPSE> cs = p.circ;
                 for (auto& c : cs) { c.point.x += off.x; c.point.y += off.y; }
                 g = vidro::Gosma(f, D2D1::RectF(off.x + p.cap.left, off.y + p.cap.top, off.x + p.cap.right, off.y + p.cap.bottom), p.capR, cs.data(), (int)cs.size(), p.broken);
+            } else if (p.notch) {  // Ilha Dinâmica em estilo Notch: orelhas côncavas em cima e cantos redondos embaixo
+                g = NotchPath(f, D2D1::RectF(off.x + p.r.left, off.y + p.r.top, off.x + p.r.right, off.y + p.r.bottom), p.notchRt, p.notchRb);
             } else {
                 ID2D1RoundedRectangleGeometry* rg = nullptr;
                 f->CreateRoundedRectangleGeometry(D2D1::RoundedRect(D2D1::RectF(off.x + p.r.left, off.y + p.r.top, off.x + p.r.right, off.y + p.r.bottom), p.radius, p.radius), &rg);
@@ -1928,7 +1982,8 @@ void backdrop::SetPieces(HWND h, float w, float hgt, const std::vector<Piece>& p
     bool same = e.hasSet && e.w == w && e.h == hgt && e.pieces.size() == pieces.size() && !memcmp(&e.pieceTint, &tint, sizeof(tint)) &&
                 std::equal(pieces.begin(), pieces.end(), e.pieces.begin(), [](const Piece& a, const Piece& b) {
                     return !memcmp(&a.r, &b.r, sizeof(a.r)) && a.radius == b.radius && a.goo == b.goo && !memcmp(&a.cap, &b.cap, sizeof(a.cap)) &&
-                           a.capR == b.capR && a.broken == b.broken && a.circ.size() == b.circ.size() &&
+                           a.capR == b.capR && a.broken == b.broken && a.notch == b.notch && a.notchRt == b.notchRt && a.notchRb == b.notchRb &&
+                           a.circ.size() == b.circ.size() &&
                            (a.circ.empty() || !memcmp(a.circ.data(), b.circ.data(), a.circ.size() * sizeof(D2D1_ELLIPSE)));
                 });
     if (same) {

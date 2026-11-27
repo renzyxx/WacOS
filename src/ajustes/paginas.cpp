@@ -1778,6 +1778,9 @@ Page CentralControle() {
     return p;
 }
 
+static float NumSetting(const wchar_t* k, float def) { std::wstring v = Setting(k, L""); return v.empty() ? def : (float)_wtof(v.c_str()); }
+static std::function<void(float)> SetNum(const wchar_t* k) { std::wstring kk = k; return [kk](float v) { SetSetting(kk.c_str(), std::to_wstring((int)std::lround(v))); }; }
+
 // ================= Ilha Dinâmica (issue #8: página própria; antes ficava no fim da Central de Controle)
 Page IlhaDinamica() {
     Page p;
@@ -1803,16 +1806,30 @@ Page IlhaDinamica() {
         ilha.push_back(Toggle(L"Mostrar ao arrastar arquivos", on(L"ilha_arrastar", L"1"), set(L"ilha_arrastar"),
                               L"Arraste um arquivo até o topo da tela e a ilha aparece aberta na Estante, mesmo quando ela não fica à mostra."));
     p.groups.push_back(G(ilha, L"Ilha Dinâmica"));
-    if (Setting(L"ilha", L"0") == L"1")
+    if (Setting(L"ilha", L"0") == L"1") {
+        bool tahoe = Setting(L"liquid_glass", L"0") == L"1";
+        std::vector<Row> fundo = { Toggle(L"Fundo de vidro", on(L"ilha_vidro", L"0"), set(L"ilha_vidro"),
+                                          L"Deixa a ilha com transparência em vidro (Liquid Glass ou fosco), como o Dock e os outros módulos.") };
+        if (Setting(L"ilha_vidro", L"0") == L"1") {
+            static const wchar_t* cores[] = { L"auto", L"clara", L"escura", L"destaque" };
+            Row cor = Popup(L"Cor do vidro", { L"Automática", L"Clara", L"Escura", L"Cor de destaque" },
+                            [] { std::wstring v = Setting(L"ilha_cor", L"auto"); for (int i = 0; i < 4; i++) if (v == cores[i]) return i; return 0; },
+                            [](int i) { SetSetting(L"ilha_cor", cores[std::clamp(i, 0, 3)]); });
+            float opacDef = tahoe ? 39.f : 45.f;
+            Row opac = Slider(L"Opacidade do vidro", 0, 100, [opacDef] { return NumSetting(L"ilha_opacidade", opacDef); }, SetNum(L"ilha_opacidade"), L"Transparente", L"Sólido");
+            opac.hasDef = true; opac.def = opacDef;
+            fundo.push_back(cor);
+            fundo.push_back(opac);
+        }
+        p.groups.push_back(G(fundo, L"Fundo"));
         p.groups.push_back(G({ Note(L"Na ilha também ficam a bolinha laranja (microfone) ou verde (câmera) em uso, o timer (aba Timer: pausar, parar, ±1 minuto) e o histórico do que você copiou (aba Transferência).") }));
+    }
     return p;
 }
 
 // ================= Personalizar o Dock / a Mesa (pedido de 20/11/2026, na linha do MyDockFinder)
 // O Shell lê cada chave (dock.cpp ReadSettings, mesa.cpp LerMedidas, widgets.cpp SettingsChanged) assim que o
 // ajustes.txt muda. Chave vazia = o padrão medido do Mac em cada tema.
-static float NumSetting(const wchar_t* k, float def) { std::wstring v = Setting(k, L""); return v.empty() ? def : (float)_wtof(v.c_str()); }
-static std::function<void(float)> SetNum(const wchar_t* k) { std::wstring kk = k; return [kk](float v) { SetSetting(kk.c_str(), std::to_wstring((int)std::lround(v))); }; }
 static Row Flag(const std::wstring& label, const wchar_t* k, const wchar_t* def, const std::wstring& detail = L"") {
     std::wstring kk = k, dd = def;
     return Toggle(label, [kk, dd] { return Setting(kk.c_str(), dd.c_str()) != L"0"; }, [kk](bool on) { SetSetting(kk.c_str(), on ? L"1" : L"0"); }, detail);
