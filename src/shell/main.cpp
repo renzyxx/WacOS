@@ -5,6 +5,7 @@
 #include "../comum/simbolos.h"
 #include "../comum/ajustes_arquivo.h"
 #include "../comum/idioma.h"
+#include "../comum/nuvem.h"
 #include "../menu/context_menu.h"
 #include <shlobj.h>
 #include <propkey.h>
@@ -523,6 +524,7 @@ bool shell::PastaProtegida(const std::wstring& path0) {
             if (igual) return true;
         }
     }
+    for (auto& c : nuvem::PastasOneDrive()) if (!_wcsicmp(c.caminho.c_str(), p.c_str())) return true;
     return false;
 }
 

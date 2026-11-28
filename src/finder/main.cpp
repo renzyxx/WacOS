@@ -6,6 +6,7 @@
 
 #include "finder.h"
 #include "../comum/fonte_cjk.h" // a reserva para coreano, japonês e chinês
+#include "../comum/nuvem.h"
 #include <d2d1effects.h>  // Leopard: a perspectiva 3D do Cover Flow
 #pragma comment(lib, "dxguid.lib")
 #include <windowsx.h>
@@ -7138,6 +7139,8 @@ static void BuildSidebar() {
                            { &FOLDERID_Documents, 0xE8A5 }, { &FOLDERID_Downloads, 0xE896 }, { &FOLDERID_Pictures, 0xE91B },
                            { &FOLDERID_Music, 0xE8D6 }, { &FOLDERID_Videos, 0xE714 }, { &FOLDERID_Profile, 0xE80F }, { &FOLDERID_SkyDrive, 0xE753 } };
     for (auto& k : special) { std::wstring p = KnownFolder(*k.id); if (!p.empty()) g_emblems.push_back({ p, k.glyph }); }
+    auto clouds = nuvem::PastasOneDrive();
+    for (auto& c : clouds) g_emblems.push_back({ c.caminho, 0xE753 });
 
     const bool leoSide = !g_tahoe && tahoe::Leopard();
     auto devices = [&](const std::wstring& title) {
@@ -7164,10 +7167,9 @@ static void BuildSidebar() {
             g_side.push_back(e);
         }
         devices(Tr(L"Dispositivos"));
-        std::wstring cl = KnownFolder(FOLDERID_SkyDrive);
-        if (!cl.empty() && GetFileAttributesW(cl.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        if (!clouds.empty()) {
             g_side.push_back({ Tr(L"Compartilhado"), L"", 0, true });
-            g_side.push_back({ L"OneDrive", cl, 0xE753, false });
+            for (auto& c : clouds) g_side.push_back({ c.rotulo, c.caminho, 0xE753, false });
         }
         g_side.push_back({ Tr(L"Buscar Por"), L"", 0, true });
         const wchar_t smartGlyph[6] = { 0xE823, 0xE823, 0xE823, 0xE91B, 0xE714, 0xE8A5 };  // relógio ×3, imagem, filme, documento
@@ -7180,11 +7182,10 @@ static void BuildSidebar() {
         g_side.push_back(e);
     }
 
-    // OneDrive faz o papel do iCloud Drive
-    std::wstring cloud = g_sideCloud ? KnownFolder(FOLDERID_SkyDrive) : L"";
-    if (!cloud.empty() && GetFileAttributesW(cloud.c_str()) != INVALID_FILE_ATTRIBUTES) {
+    // OneDrive faz o papel do iCloud Drive (pessoal, corporativo e múltiplas contas)
+    if (g_sideCloud && !clouds.empty()) {
         g_side.push_back({ L"OneDrive", L"", 0, true });
-        g_side.push_back({ L"OneDrive", cloud, 0xE753, false });
+        for (auto& c : clouds) g_side.push_back({ c.rotulo, c.caminho, 0xE753, false });
     }
 
     if (g_sideDrives) {
@@ -7285,8 +7286,7 @@ static void FinderSettings() {
     }
     ctxmenu::Item sep; sep.separator = true;
     items.push_back(sep);
-    std::wstring cl = KnownFolder(FOLDERID_SkyDrive);
-    if (!cl.empty() && GetFileAttributesW(cl.c_str()) != INVALID_FILE_ATTRIBUTES) { ctxmenu::Item c; c.label = L"OneDrive"; c.id = 40; c.checked = g_sideCloud; c.icon = 0xE753; items.push_back(c); }
+    if (!nuvem::PastasOneDrive().empty()) { ctxmenu::Item c; c.label = L"OneDrive"; c.id = 40; c.checked = g_sideCloud; c.icon = 0xE753; items.push_back(c); }
     { ctxmenu::Item c; c.label = Tr(L"Locais"); c.id = 41; c.checked = g_sideDrives; c.icon = 0xEDA2; items.push_back(c); }
     { ctxmenu::Item c; c.label = Tr(L"Etiquetas"); c.id = 42; c.checked = g_sideTags; c.icon = 0xE8EC; items.push_back(c); }
     items.push_back(sep);

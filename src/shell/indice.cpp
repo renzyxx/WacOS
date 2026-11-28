@@ -4,6 +4,7 @@
 // varredura nova roda em segundo plano; depois, mudanças nas pastas refazem o índice (no máximo a
 // cada 2 minutos). A busca é uma passada na memória: milissegundos mesmo com centenas de milhares de itens.
 #include "shell.h"
+#include "../comum/nuvem.h"
 #include <shlobj.h>
 #include <algorithm>
 #include <atomic>
@@ -100,7 +101,7 @@ template <class F> void List(const std::wstring& path, bool top, bool profile, F
         if ((n[0] == L'.' && !n[1]) || (n[0] == L'.' && n[1] == L'.' && !n[2])) continue;
         bool dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM && dir) continue;
-        if (dir && (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;  // junções (evita voltas)
+        if (dir && nuvem::ReparseDeDesvio(fd)) continue;  // junções e links (evita voltas; pastas da nuvem entram)
         if (dir && SkipDir(n, top, profile)) continue;
         size_t len = wcslen(n);
         if (len > 0xFFFF) continue;
@@ -375,7 +376,7 @@ std::vector<Watch*> MakeWatches() {
         HANDLE f = FindFirstFileExW((root + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
         if (f == INVALID_HANDLE_VALUE) continue;
         do {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_SYSTEM))) continue;
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) || nuvem::ReparseDeDesvio(fd)) continue;
             if ((fd.cFileName[0] == L'.' && (!fd.cFileName[1] || fd.cFileName[1] == L'.')) || SkipDir(fd.cFileName, true, profile)) continue;
             add(root + L"\\" + fd.cFileName, root, profile, true);
         } while (FindNextFileW(f, &fd));
