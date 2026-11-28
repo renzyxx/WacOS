@@ -120,6 +120,8 @@ void PlaceCaretAtEnd();
 // tabela, anexos e Ferramentas de Escrita (botões da barra do macOS 26/27)
 void InsertTable(int rows, int cols);
 void InsertAttachment(const std::wstring& path);
+void ForgetImage(const std::wstring& path);   // o arquivo da imagem mudou: lê de novo
+extern bool (*OpenDrawing)(const std::wstring& path);  // clique duplo num anexo: true se a folha de desenho abriu
 enum Writing { W_PROOF, W_LIST, W_TABLE, W_UPPER, W_LOWER, W_TITLE };
 bool Transform(int kind);     // false: nada mudou
 bool InTable();
