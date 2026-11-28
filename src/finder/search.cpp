@@ -1,6 +1,7 @@
 // Busca no índice do Windows Search (o "Spotlight" do Windows), via OLE DB/ADO.
 // Pastas fora do índice caem numa varredura simples pelo nome.
 #include "finder.h"
+#include "../comum/nuvem.h"
 #include <shlwapi.h>
 #include <shlobj.h>
 #import "C:\\Program Files\\Common Files\\System\\ado\\msado15.dll" no_namespace rename("EOF", "AdoEOF")
@@ -147,7 +148,7 @@ int Walk(const std::wstring& q, const std::wstring& folder, int max, const std::
             if (fd.cFileName[0] == L'.') continue;
             std::wstring p = dir + (dir.back() == L'\\' ? L"" : L"\\") + fd.cFileName;
             if (StrStrIW(fd.cFileName, q.c_str())) { n++; if (!onPath(p) || n >= max) { stop = true; break; } }
-            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) stack.push_back(p);
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !nuvem::ReparseDeDesvio(fd)) stack.push_back(p);
         } while (FindNextFileW(f, &fd));
         FindClose(f);
     }

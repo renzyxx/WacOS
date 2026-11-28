@@ -23,6 +23,7 @@
 #include <thread>
 #include "../comum/idioma.h"
 #include "../comum/semaforo.h"
+#include "../comum/nuvem.h"
 
 namespace {
 
@@ -156,9 +157,12 @@ void Walk(const std::wstring& dir, Calc& c, unsigned long long cl) {
         {
             std::lock_guard<std::mutex> g(c.m);
             c.items++;
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) { c.bytes += sz; c.disk += OnDisk(sz, cl); }
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                c.bytes += sz;
+                if (!nuvem::SoNaNuvem(fd.dwFileAttributes)) c.disk += OnDisk(sz, cl);
+            }
         }
-        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !nuvem::ReparseDeDesvio(fd))
             Walk(dir + L"\\" + fd.cFileName, c, cl);
     } while (FindNextFileW(h, &fd));
     FindClose(h);
@@ -340,16 +344,18 @@ void Gather(Info& in) {
         in.sizeText = Tr(L"Calculando…");
     } else {
         unsigned long long sz = ((unsigned long long)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
+        unsigned long long noDisco = nuvem::SoNaNuvem(fa.dwFileAttributes) ? 0 : OnDisk(sz, Cluster(p));
         in.headerSize = Human(sz);
-        in.sizeText = Thousands(sz) + Tr(L" bytes (") + Human(OnDisk(sz, Cluster(p))) + Tr(L" no disco)");
+        in.sizeText = Thousands(sz) + Tr(L" bytes (") + Human(noDisco) + Tr(L" no disco)");
         wchar_t app[260] = {}; DWORD n = 260;
         const wchar_t* ext = PathFindExtensionW(p.c_str());
         if (*ext && SUCCEEDED(AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_FRIENDLYAPPNAME, ext, L"open", app, &n))) in.openWith = app;
         else in.openWith = Tr(L"Nenhum aplicativo");
     }
-    // permissões: tenta abrir para escrita sem mexer em nada
+    // permissões: tenta abrir para escrita sem mexer em nada (em arquivo só na nuvem, sem hidratá-lo)
     DWORD acc = in.dir ? FILE_ADD_FILE : FILE_WRITE_DATA;
-    HANDLE hf = CreateFileW(p.c_str(), acc, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, in.dir ? FILE_FLAG_BACKUP_SEMANTICS : 0, nullptr);
+    DWORD flags = in.dir ? FILE_FLAG_BACKUP_SEMANTICS : (nuvem::SoNaNuvem(fa.dwFileAttributes) ? FILE_FLAG_OPEN_REPARSE_POINT : 0);
+    HANDLE hf = CreateFileW(p.c_str(), acc, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, flags, nullptr);
     in.canWrite = hf != INVALID_HANDLE_VALUE;
     if (hf != INVALID_HANDLE_VALUE) CloseHandle(hf);
     GatherPerms(in);
