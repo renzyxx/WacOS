@@ -869,6 +869,9 @@ void SaveCell(const Widget& w) {
 
 void Position(Widget& wd, bool reset, bool animate = false) {
     Grid g = GridNow(wd.wnd);
+    // Um widget largo ocupa duas colunas reais, incluindo o espaço extra de PassoX.
+    // Assim suas bordas continuam alinhadas às de dois widgets pequenos na mesma grade.
+    wd.w = Cols(wd) == 2 ? SMALL + PassoX(g) : SMALL;
     int rc = -1, row = -1, a, b;
     std::wstring saved = reset ? L"" : shell::Setting((std::wstring(L"widget.") + wd.id).c_str(), L"");
     wd.rc = -1;
