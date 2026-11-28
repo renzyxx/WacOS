@@ -34,8 +34,13 @@ std::map<DWORD, Permissao> g_procOk; // processo -> permitido (chromium: Chromiu
 std::vector<std::wstring> g_extra;   // exclusões do usuário
 const UINT HOST_HOOK = WM_APP + 1, HOST_QUIT = WM_APP + 2;
 
-// Jogos, launchers, anti-cheat e partes do próprio Windows: nunca recebem a DLL
+// Jogos, launchers, anti-cheat, partes do próprio Windows e apps cuja janela a DLL quebra: nunca recebem a DLL
 const wchar_t* EXCLUDED_EXE[] = {
+    // apps Qt e de jogo cuja janela a DLL quebra (PRs #224 e #225 do 404-Page-Found, 28/11/2026):
+    // Premiere Pro (issue #219): atalhos de teclado (espaço, Ctrl+S) e o fechar da barra paravam;
+    // VLC (issue #220): barra quebrada e o duplo clique não ia para a tela cheia com a janela pequena;
+    // GeForce NOW (issues #195 e #197): os botões do Windows apareciam na barra e o jogo abria numa janela pequena
+    L"adobe premiere pro.exe", L"vlc.exe", L"geforcenow.exe",
     L"explorer.exe", L"dwm.exe", L"shell.exe", L"arquivos.exe", L"ajustes.exe", L"monitoratividade.exe", L"terminal.exe", L"calculadora.exe", L"notas.exe",
     L"wacosshell.exe", L"wacosfinder.exe", L"wacossettings.exe", L"wacosactivitymonitor.exe", L"wacosterminal.exe", L"wacoscalculator.exe", L"wacosnotes.exe", L"wacoswindow32host.exe", L"searchhost.exe", L"startmenuexperiencehost.exe",
     L"snippingtool.exe", L"screenclippinghost.exe",  // Ferramenta de Captura (gravação de tela parava: prints do Discord, 19/11/2026)

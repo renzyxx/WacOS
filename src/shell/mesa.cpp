@@ -2126,6 +2126,11 @@ bool mesa::IsWindowsShell() { return WinlogonIsOurs(); }
 void mesa::RunStartupApps() {
     if (!WinlogonIsOurs()) return;
     if (shell::Setting(L"explorer", L"") == L"1") { Log(L"inicialização: explorer=1 (o Explorador abre os apps)"); return; }
+    // Explorador no fundo (o padrão, ajuste vazio ou "fundo"; e o nativo): o Shell abre o explorer.exe como shell do
+    // Windows logo depois (StartExplorer troca o Winlogon por uns segundos), e ele mesmo roda Run e Inicializar. Rodar
+    // aqui também abria cada app duas vezes (issue #207: SuperCopier, LocalSend, AMD Software, OneDrive)
+    { std::wstring ex = shell::Setting(L"explorer", L"");
+      if (ex.empty() || ex == L"fundo" || shell::nativo) { Log(L"inicialização: Explorador no fundo (ele abre os apps)"); return; } }
     if (GlobalFindAtomW(L"SequoiaShellInicializacao")) { Log(L"inicialização: já rodou nesta sessão"); return; }
     GlobalAddAtomW(L"SequoiaShellInicializacao");
     if (g_explorerAtStart) { Log(L"inicialização: o Explorador já estava aberto (ele abriu os apps)"); return; }

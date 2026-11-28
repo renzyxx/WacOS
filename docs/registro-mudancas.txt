@@ -2085,3 +2085,16 @@ Compilado (tudo), instalado, Shell e reserva do Finder reiniciados às 23:07 sem
   PecoFence/Fences ficam ali), e o PecoFence subia de volta: as duas piscando sem fim. mesa.cpp: só volta para cima
   quando a nossa mesa ficou ABAIXO da do Explorador (Win+D...). Compilado (build.cmd shell), não instalado.
   DESFAZER: voltar a condição para GetWindow(ed, GW_HWNDPREV) != p->h em mesa.cpp e compilar.
+[2026-11-28 12:10] Issues e PRs de 28/11:
+  - PR #223 (issue #218): Ilha, capa do álbum um disco atrasada no Apple Music (ilha.cpp; aplicado como veio).
+  - PR #232: chinês simplificado, 165 textos (idioma_zh.inc).
+  - PRs #224 e #225 + issues #195/#197: Premiere Pro, VLC e GeForce NOW fora da DLL das janelas (janelas.cpp
+    EXCLUDED_EXE). Juntei os dois PRs à mão (mexiam na mesma linha).
+  - Issue #235: Finder e Ajustes com DWMWA_CAPTION_COLOR = nenhuma (ou a cor da barra lateral, se o Windows recusar):
+    com a cor de destaque nas barras de título ligada no Windows, o topo da barra lateral ficava azul. Não testado
+    (no PC a opção está desligada).
+  - Issue #234: fonte_cjk.h registra as listas CJK sem idioma (o DirectWrite só usava com o texto no mesmo idioma).
+  - Issue #207: com o Explorador no fundo (padrão) o Shell não roda mais os apps de inicialização: o Explorador que o
+    Shell abre como shell já roda (abriam duas vezes).
+  Compilado (build.cmd e build.cmd janelas). Não instalado.
+  DESFAZER: reverter o commit e compilar (build.cmd e build.cmd janelas).

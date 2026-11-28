@@ -6413,6 +6413,14 @@ static void ApplyWindowTheme() {
     shadow::SetRadius(0);
     COLORREF border = g_dark ? RGB(88, 88, 92) : RGB(196, 196, 200);  // borda fina e clara, como no Mac
     DwmSetWindowAttribute(g_hwnd, 34 /*DWMWA_BORDER_COLOR*/, &border, sizeof(border));
+    // issue #235: com "Mostrar a cor de destaque nas barras de título" do Windows ligado, o DWM pintava o topo da barra
+    // lateral (atrás dos semáforos) com a cor de destaque na janela ativa. Sem cor de barra: o acrílico fica igual
+    // em cima e embaixo, como no Mac. Se o Windows recusar o "nenhuma", a cor da barra lateral.
+    COLORREF semBarra = 0xFFFFFFFE;  // DWMWA_COLOR_NONE
+    if (FAILED(DwmSetWindowAttribute(g_hwnd, 35 /*DWMWA_CAPTION_COLOR*/, &semBarra, sizeof(semBarra)))) {
+        COLORREF lateral = g_dark ? RGB(0x2D, 0x2D, 0x2F) : RGB(0xE9, 0xE9, 0xEA);
+        DwmSetWindowAttribute(g_hwnd, 35, &lateral, sizeof(lateral));
+    }
     // Acrílico do sistema, sem tinta extra nossa: é o mais transparente que dá. O desfoque antigo
     // (SetWindowCompositionAttribute) foi testado com tinta e flag de gradiente: o DWM o desenha
     // POR CIMA do conteúdo DirectComposition, apagando texto e ícones. Descartado.

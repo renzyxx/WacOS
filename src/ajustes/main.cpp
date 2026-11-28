@@ -1936,6 +1936,12 @@ void ApplyWindowTheme() {
     shadow::SetRadius(0);
     COLORREF border = g_dark ? RGB(88, 88, 92) : RGB(196, 196, 200);
     DwmSetWindowAttribute(g_hwnd, 34 /*DWMWA_BORDER_COLOR*/, &border, sizeof(border));
+    // issue #235: sem a cor de destaque do Windows no topo da barra lateral (ver o mesmo trecho no Finder)
+    COLORREF semBarra = 0xFFFFFFFE;  // DWMWA_COLOR_NONE
+    if (FAILED(DwmSetWindowAttribute(g_hwnd, 35 /*DWMWA_CAPTION_COLOR*/, &semBarra, sizeof(semBarra)))) {
+        COLORREF lateral = g_dark ? RGB(0x2D, 0x2D, 0x2F) : RGB(0xE9, 0xE9, 0xEA);
+        DwmSetWindowAttribute(g_hwnd, 35, &lateral, sizeof(lateral));
+    }
     int backdrop = 3;  // DWMSBT_TRANSIENTWINDOW: acrílico do sistema na barra lateral
     DwmSetWindowAttribute(g_hwnd, 38 /*DWMWA_SYSTEMBACKDROP_TYPE*/, &backdrop, sizeof(backdrop));
 }

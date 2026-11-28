@@ -153,6 +153,7 @@ struct Media {
 std::mutex g_mmx;
 std::condition_variable g_mcv;
 Media g_md;
+uint64_t g_artHash;  // a capa na tela (sob g_mmx): reconhece a da faixa anterior chegando atrasada (issue #218)
 bool g_mWake, g_mRebind;
 struct Cmd { int c; double v; };
 std::vector<Cmd> g_cmds;   // 1 tocar/pausar, 2 próxima, 3 anterior, 4 aleatório (v), 5 posição (v s)
@@ -240,6 +241,13 @@ bool DecodeThumb(const wmc::GlobalSystemMediaTransportControlsSessionMediaProper
     return ok;
 }
 
+// FNV-1a dos pixels: diz se a capa que o app mandou é a mesma que já está na ilha
+uint64_t HashArt(const std::vector<BYTE>& px) {
+    uint64_t h = 14695981039346656037ull;
+    for (BYTE b : px) { h ^= b; h *= 1099511628211ull; }
+    return h;
+}
+
 // cor das barrinhas e do tempo restante: a média da capa, viva e clara o bastante para aparecer no preto
 D2D1_COLOR_F ArtTint(const std::vector<BYTE>& px) {
     double r = 0, g = 0, b = 0, n = 0;
@@ -293,12 +301,17 @@ void MediaThread() {
         mgr.SessionsChanged([](auto&&, auto&&) { MediaWake(true); });  // app de mídia abriu/fechou (Spotify...)
     } catch (...) { Log(L"ilha: sem acesso aos controles de mídia do Windows"); return; }
     std::wstring lastKey;
+    int artRetry = 0;       // capa atrasada: quantas vezes já esperou a da faixa nova
+    bool retrySoon = false; // acorda em instantes para tentar a capa de novo
     for (;;) {
         bool rebind; std::vector<Cmd> cmds;
         {
             std::unique_lock<std::mutex> l(g_mmx);
             // nada tocando: olha de novo a cada 2 s (outro app pode ter começado a tocar sem virar a sessão "atual")
-            if (g_md.playing) g_mcv.wait(l, [] { return g_mWake; });
+            if (g_md.playing) {
+                if (retrySoon) { retrySoon = false; g_mcv.wait_for(l, std::chrono::milliseconds(700), [] { return g_mWake; }); }
+                else g_mcv.wait(l, [] { return g_mWake; });
+            }
             else if (!g_mcv.wait_for(l, std::chrono::seconds(2), [] { return g_mWake; })) g_mRebind = true;
             g_mWake = false; rebind = g_mRebind; g_mRebind = false; cmds.swap(g_cmds);
         }
@@ -357,19 +370,36 @@ void MediaThread() {
                 out.pos = std::clamp(pos, 0.0, std::max(out.len, 0.0));
                 out.at = anim::Now();
                 std::wstring key = out.title + L"\x1f" + out.artist + L"\x1f" + out.aumid;
-                bool needArt;
-                { std::lock_guard<std::mutex> l(g_mmx); needArt = key != lastKey || g_md.art.empty(); }
+                bool newTrack = key != lastKey;
+                bool artEmpty; uint64_t curHash;
+                { std::lock_guard<std::mutex> l(g_mmx); artEmpty = g_md.art.empty(); curHash = g_artHash; }
+                bool needArt = newTrack || artEmpty;
+                bool settled = !needArt;  // a capa desta faixa já está valendo
+                uint64_t newHash = 0;
                 if (out.has && needArt) {
                     std::vector<BYTE> px; UINT w = 0, h = 0;
                     bool thumb = (bool)p.Thumbnail();
-                    if (DecodeThumb(p, px, w, h)) { out.tint = ArtTint(px); out.art = std::move(px); out.aw = w; out.ah = h; }
-                    else if (key != lastKey) Log(L"ilha: '%ls' sem capa (%ls)", out.title.c_str(), thumb ? L"não decodificou" : L"o app não mandou");
+                    if (DecodeThumb(p, px, w, h)) {
+                        newHash = HashArt(px);
+                        if (newTrack && !artEmpty && newHash == curHash && artRetry < 8) {
+                            // a faixa mudou mas o app ainda manda a capa da anterior (Apple Music, issue #218):
+                            // não grava essa nem trava a faixa — tenta de novo no próximo aviso
+                            artRetry++; retrySoon = true;
+                        } else {
+                            out.tint = ArtTint(px); out.art = std::move(px); out.aw = w; out.ah = h;
+                            settled = true; artRetry = 0;
+                        }
+                    } else {
+                        if (newTrack) Log(L"ilha: '%ls' sem capa (%ls)", out.title.c_str(), thumb ? L"não decodificou" : L"o app não mandou");
+                        settled = true; artRetry = 0;
+                    }
                 }
                 std::lock_guard<std::mutex> l(g_mmx);
-                if (out.has && needArt && (!out.art.empty() || key != lastKey)) {  // faixa nova (ou a capa chegou depois)
+                if (out.has && settled && needArt) {  // faixa nova (ou a capa chegou depois)
                     g_md.art = std::move(out.art); g_md.aw = out.aw; g_md.ah = out.ah; g_md.tint = out.tint; g_md.artGen++;
+                    g_artHash = newHash;  // 0 quando a faixa nova não tem capa: a da anterior não vale mais
                 }
-                if (out.has) lastKey = key;
+                if (out.has && settled) lastKey = key;  // só trava a faixa com a capa resolvida
                 g_md.has = out.has; g_md.playing = out.playing; g_md.shuffle = out.shuffle; g_md.canShuffle = out.canShuffle;
                 g_md.title = out.title; g_md.artist = out.artist; g_md.aumid = out.aumid;
                 g_md.pos = out.pos; g_md.len = out.len; g_md.start = out.start; g_md.at = out.at;

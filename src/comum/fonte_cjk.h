@@ -70,11 +70,14 @@ inline IDWriteFontFallback* Fallback(IDWriteFactory* factory) {
         // ideogramas, pontuação CJK e formas de largura cheia: a fonte do idioma do WacOS
         const DWRITE_UNICODE_RANGE han[] = {
             { 0x3000, 0x303F }, { 0x3400, 0x4DBF }, { 0x4E00, 0x9FFF }, { 0xF900, 0xFAFF }, { 0xFF00, 0xFF65 }, { 0xFFE0, 0xFFEF } };
-        b->AddMapping(hangul, ARRAYSIZE(hangul), kr.data(), (UINT32)kr.size(), nullptr, L"ko-KR", nullptr, 1.0f);
-        b->AddMapping(kana, ARRAYSIZE(kana), jp.data(), (UINT32)jp.size(), nullptr, L"ja-JP", nullptr, 1.0f);
-        if (ko) b->AddMapping(han, ARRAYSIZE(han), kr.data(), (UINT32)kr.size(), nullptr, L"ko-KR", nullptr, 1.0f);
-        else if (ja) b->AddMapping(han, ARRAYSIZE(han), jp.data(), (UINT32)jp.size(), nullptr, L"ja-JP", nullptr, 1.0f);
-        else if (zh) b->AddMapping(han, ARRAYSIZE(han), cn.data(), (UINT32)cn.size(), nullptr, L"zh-CN", nullptr, 1.0f);
+        // sem idioma no mapeamento (issue #234, Beicxxxx): o DirectWrite só usa um mapeamento com idioma quando o texto
+        // tem esse mesmo idioma, e os formatos de texto são criados com "pt-br"/"" : as listas daqui eram ignoradas
+        // em quase todas as janelas. A escolha do idioma já foi feita acima (qual lista vai para o han).
+        b->AddMapping(hangul, ARRAYSIZE(hangul), kr.data(), (UINT32)kr.size(), nullptr, nullptr, nullptr, 1.0f);
+        b->AddMapping(kana, ARRAYSIZE(kana), jp.data(), (UINT32)jp.size(), nullptr, nullptr, nullptr, 1.0f);
+        if (ko) b->AddMapping(han, ARRAYSIZE(han), kr.data(), (UINT32)kr.size(), nullptr, nullptr, nullptr, 1.0f);
+        else if (ja) b->AddMapping(han, ARRAYSIZE(han), jp.data(), (UINT32)jp.size(), nullptr, nullptr, nullptr, 1.0f);
+        else if (zh) b->AddMapping(han, ARRAYSIZE(han), cn.data(), (UINT32)cn.size(), nullptr, nullptr, nullptr, 1.0f);
         if (SUCCEEDED(f2->GetSystemFontFallback(&sys)) && sys) b->AddMappings(sys);  // o resto: a reserva do Windows
         b->CreateFontFallback(&fb);
     }
