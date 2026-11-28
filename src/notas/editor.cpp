@@ -425,6 +425,13 @@ UINT ClipFormat() { static UINT f = RegisterClipboardFormatW(L"NotasParagrafos")
 
 // ---------------------------------------------------------------------------
 namespace editor {
+// um desenho editado de novo regravou o PNG: solta a imagem guardada para ela ser lida outra vez
+void ForgetImage(const std::wstring& path) {
+    auto it = imgs.find(path);
+    if (it != imgs.end()) { if (it->second) it->second->Release(); imgs.erase(it); }
+    dirtyLayout = true;
+}
+bool (*OpenDrawing)(const std::wstring& path) = nullptr;
 
 void SetFormats(const std::wstring& fam, const std::wstring& mono) {
     family = fam; monoFamily = mono;
@@ -749,7 +756,7 @@ void OnMouseDown(D2D1_POINT_2F p, bool shift, int clicks) {
     if (P(q.p).kind == K_FILE) {  // anexo: clique põe o cursor nele; clique duplo abre no programa padrão
         caret = q; if (!shift) anchor = q;
         clickMode = 1;
-        if (clicks == 2) ShellExecuteW(nullptr, L"open", P(q.p).src.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (clicks == 2 && !(OpenDrawing && OpenDrawing(P(q.p).src))) ShellExecuteW(nullptr, L"open", P(q.p).src.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         RequestPaint();
         return;
     }

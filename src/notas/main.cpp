@@ -4,6 +4,9 @@
 // tema claro/escuro do sistema. Dados em %APPDATA%\Shell\Notas (grava sozinho enquanto digita).
 //   Notas.exe [--dados=<pasta>] [--captura=<arquivo.png> --escuro|--claro --tamanho=LxA --pasta=<id> --nota=<n> --galeria --aa]
 #include "notas.h"
+#include "tinta.h"  // o motor de traço da folha de desenho
+#include "instrumentos.h"  // a arte dos instrumentos da folha
+#include <commdlg.h>
 #include "../comum/fonte_cjk.h" // a reserva para coreano, japonês e chinês
 #include <windowsx.h>
 #include <dwmapi.h>
@@ -30,6 +33,7 @@
 
 #pragma comment(lib, "imm32.lib")
 #pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "comdlg32.lib")
 
 FILE* g_log;
 void Log(const wchar_t* fmt, ...) {
@@ -49,7 +53,7 @@ namespace {
 // medidas (pt), da referência do Notas no Sequoia
 const float TOOLBAR_H = 52, TOOL_CY = 26, SIDE_ROW_H = 28, SIDE_HDR_H = 30;
 const float SIDE_MIN = 160, SIDE_MAX = 340, LIST_MIN = 200, LIST_MAX = 480, EDITOR_MIN = 300;  // lista: 200 (era 220, issue #8)
-const UINT_PTR T_BLINK = 1, T_SAVE = 2, T_FRONT = 3, T_IA = 4;
+const UINT_PTR T_BLINK = 1, T_SAVE = 2, T_FRONT = 3, T_IA = 4, T_HOLD = 9;
 const UINT WM_APP_IA = WM_APP + 8;  // a thread da IA terminou (lParam = new IaFeito)
 const UINT WM_APP_TRAZER = WM_APP + 7;  // segunda cópia aberta (Launchpad, Spotlight, Dock): vem para a frente
 
@@ -91,15 +95,71 @@ D2D1_RECT_F g_sheetOk, g_sheetCancel;
 
 // folha de desenho (botão de marcação): uma tela branca para rabiscar com o mouse ou a caneta; "Inserir" grava um PNG
 // em 2x em Notas\anexos e põe na nota como anexo. Os pontos ficam relativos ao canto da tela (a janela pode mudar).
+// O traço vem do motor tinta.h: espessura pela pressão da caneta (WM_POINTER) ou pela velocidade no mouse.
+// A interface (paleta, instrumentos, régua, laço) está em folha.inc.
+const D2D1_COLOR_F SK_COLORS[5] = { D2D1::ColorF(0x111114), D2D1::ColorF(0x2563eb), D2D1::ColorF(0x16a34a), D2D1::ColorF(0xf5b700), D2D1::ColorF(0xe5383b) };
+enum { SK_ERASER = tinta::TOOL_COUNT, SK_LASSO, SK_RULER_SLOT = 100 };  // depois das tintas; a régua é o último instrumento (liga/desliga)
 struct Sketch {
-    struct Stroke { std::vector<D2D1_POINT_2F> pts; int color = 0; };
-    bool on = false, drawing = false;
+    using Stroke = tinta::Stroke;
+    enum Mode { M_NONE, M_INK, M_ERASE, M_LASSO, M_MOVE, M_RULER, M_SPECTRUM, M_PAN, M_OPACITY, M_PHOTO_MOVE, M_PHOTO_SCALE, M_PHOTO_ROT, M_CROP, M_ANGLE, M_SEL_SCALE, M_SEL_ROT };
+    // a foto de fundo: posição, tamanho, giro e o recorte (polígono em coordenadas 0..1 da foto; vazio = inteira)
+    struct Photo { bool on = false; std::wstring path; float x = 0, y = 0, w = 0, h = 0, rot = 0; std::vector<D2D1_POINT_2F> clip; };
+    struct Shot { std::vector<Stroke> s; Photo p; };  // um passo do desfazer
+    bool on = false, drawing = false;  // drawing: o último traço ainda está sendo feito
     std::vector<Stroke> strokes;
-    int color = 0;
-    D2D1_RECT_F panel{}, canvas{}, bUndo{}, bClear{}, bCancel{}, bInsert{}, sw[5]{};
+    std::vector<Shot> undo, redo;
+    int tool = tinta::PEN;
+    D2D1_COLOR_F color[tinta::TOOL_COUNT];
+    int size[tinta::TOOL_COUNT];
+    float opacity[tinta::TOOL_COUNT];
+    bool eraseObject = false, tempEraser = false, changed = false, straight = false, shaped = false, eyedrop = false;
+    bool hand = false, paletteOn = true;  // mão: arrastar move o papel (também com a paleta escondida)
+    int pattern = 0, paper = 0, theme = -1;  // papel: 0 branco, 1 creme, 2 escuro; tema: -1 o do WacOS, 0 claro, 1 escuro
+    int pop = -1, hoverInst = -1;  // pop: instrumento com o balão de tamanhos aberto; 100 mais; 200 cores; 300 exportar
+    D2D1_COLOR_F custom = D2D1::ColorF(0x8b5cf6);  // a última cor escolhida no balão de cores
+    float vx = 0, vy = 0, vz = 1;  // vista: deslocamento e zoom
+    float top = 0;
+    float nib = 40;  // ângulo da pena de junco (graus)
+    ID2D1Effect *glassBlur = nullptr, *glassXf = nullptr, *glassDisp = nullptr, *glassSat = nullptr; ID2D1DeviceContext* glassDc = nullptr;  // o vidro: fosco, posição do mapa, refração, cor
+    std::vector<std::pair<std::wstring, ID2D1Bitmap*>> glassMaps;  // mapas de refração por tamanho de painel
+     // o vidro desfoca o papel por baixo  // quanto a barra de menus do WacOS cobre do alto da janela (os botões de cima descem isso)
+    int ver = 0;  // muda a cada alteração nos traços (a camada guardada se refaz)
+    Mode mode = M_NONE;
+    std::vector<D2D1_POINT_2F> lasso;
+    std::vector<int> sel;
+    D2D1_POINT_2F last{}, lastScreen{}, hover{ -1e6f, -1e6f }, holdAt{};
+    DWORD lastMoveTime = 0, penTick = 0, downTick = 0;  // penTick: a última vez que a caneta deu sinal (perto ou encostada)
+    bool penIn = false;  // a caneta está ao alcance da tela
+    struct Touch { int n = 0, target = 0; bool ui = false; UINT32 id[2]{}; D2D1_POINT_2F p[2]{}; float d0 = 1, z0 = 1, a0 = 0, r0 = 0, pw0 = 0, ph0 = 0; D2D1_POINT_2F w0{}, c0{}; } touch;  // target: 0 papel, 1 régua, 2 foto
+    struct Ruler { bool on = false, placed = false; float cx = 0, cy = 0, angle = 0; } ruler;
+    struct Snap { bool on = false; float cx = 0, cy = 0, ux = 1, uy = 0, nx = 0, ny = 1, off = 0; } snap;
+    Photo photo;
+    bool photoSel = false, crop = false;  // foto escolhida (alças de tamanho e giro); recortando (desenha a volta)
+    std::vector<D2D1_POINT_2F> cropPts;
+    std::vector<Stroke> selOrig;  // os traços escolhidos como estavam no começo do arrasto de tamanho/giro
+    float gestA = 0, gestW = 0, gestH = 0;  // início do arrasto de tamanho/giro
+    D2D1_POINT_2F gestC{}, downScreen{};
+    bool moved = false;
+    std::wstring editPath, lastSaved;  // editPath: o PNG da nota que está sendo editado de novo
+    ID2D1BitmapRenderTarget* cache = nullptr;  // papel + traços prontos
+    ID2D1DeviceContext* cacheDc = nullptr;
+    float cacheW = 0, cacheH = 0;
+    std::wstring cacheKey;
+    ID2D1Bitmap* photoBmp = nullptr;
+    D2D1_RECT_F panel{}, canvas{}, palette{}, bUndo{}, bRedo{}, inst[10]{}, sw[6]{}, pillC{}, bPen{}, bLasso{}, bHand{}, bZoom{},
+        pillR{}, bPhoto{}, bExport{}, bMore{}, popR{}, popItem[5]{}, opTrack{}, angTrack{}, paperSw[3]{}, patChip[4]{}, menuR[8]{},
+        gridR{}, specR{}, bEyedrop{}, selMenu{}, bSelDel{}, bSelDup{}, photoMenu{}, bCrop{}, bRot90{}, bUncrop{}, bPhotoDel{}, cropHint{}, bCropCancel{};
+    int menuId[8]{}, menuN = 0;
+    Sketch() {
+        for (int k = 0; k < tinta::TOOL_COUNT; k++) { color[k] = SK_COLORS[0]; size[k] = tinta::DefaultSize((tinta::Tool)k); opacity[k] = 1; }
+        color[tinta::MARKER] = SK_COLORS[3];
+    }
+    Stroke Make(bool sim) const {
+        Stroke s; int t = tool < tinta::TOOL_COUNT ? tool : tinta::PEN;
+        s.tool = (tinta::Tool)t; s.color = color[t]; s.size = tinta::Sizes(s.tool)[size[t]]; s.opacity = opacity[t]; s.nib = nib; s.sim = sim;
+        return s;
+    }
 } g_sk;
-const D2D1_COLOR_F SK_COLORS[5] = { D2D1::ColorF(0.11f, 0.11f, 0.12f), D2D1::ColorF(0.0f, 0.48f, 1.0f), D2D1::ColorF(1.0f, 0.23f, 0.19f), D2D1::ColorF(0.20f, 0.78f, 0.35f), D2D1::ColorF(1.0f, 0.75f, 0.0f) };
-const float SK_PEN = 3.f;
 void FocusEditor();
 
 IDWriteTextFormat *g_f14b, *g_f13b, *g_f13, *g_f12, *g_f12b, *g_f11, *g_f11b, *g_fCount, *g_fCardT, *g_fCardD, *g_fThumbT, *g_fThumb, *g_f13c, *g_fFmt[5];
@@ -996,8 +1056,8 @@ void Render(ID2D1DeviceContext* dc) {
     DrawFormatPanel(dc, br, pal);
     DrawDragGhost(dc, br, pal);
     DrawIa(dc, br, pal);
-    DrawSheet(dc, br, pal);
     DrawSketch(dc, br, pal);
+    DrawSheet(dc, br, pal);  // por cima do desenho (a pergunta "Descartar o desenho?")
     br->Release();
 }
 
@@ -1548,148 +1608,7 @@ void WritingMenu() {
     if (!AgeEscrita(id)) FocusEditor();
 }
 
-// ---- folha de desenho
-void SketchLayout() {
-    auto c = ClientDip();
-    float W = std::min(c.width - 40, 640.f), H = std::min(c.height - 40, 480.f);
-    float x = (c.width - W) / 2, y = std::max(TOOLBAR_H, (c.height - H) / 2);
-    g_sk.panel = { x, y, x + W, y + H };
-    g_sk.canvas = { x + 16, y + 44, x + W - 16, y + H - 58 };
-    float by = y + H - 44;
-    for (int k = 0; k < 5; k++) g_sk.sw[k] = { x + 18 + k * 30.f, by + 2, x + 42 + k * 30.f, by + 26 };
-    float bx = x + 18 + 5 * 30.f + 10;
-    auto btn = [&](D2D1_RECT_F& r, float& from, const wchar_t* t, bool right) {
-        float w = TextW(g_f13, Tr(t)) + 26;
-        if (right) { r = { from - w, by, from, by + 28 }; from -= w + 8; }
-        else { r = { from, by, from + w, by + 28 }; from += w + 8; }
-    };
-    btn(g_sk.bUndo, bx, L"Desfazer", false);
-    btn(g_sk.bClear, bx, L"Limpar", false);
-    float rx = x + W - 16;
-    btn(g_sk.bInsert, rx, L"Inserir", true);
-    btn(g_sk.bCancel, rx, L"Cancelar", true);
-}
-
-void SketchStrokes(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* br, D2D1_POINT_2F o, float k) {
-    ID2D1Factory* f = nullptr; rt->GetFactory(&f);
-    ID2D1StrokeStyle* rs = nullptr;
-    if (f) f->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND), nullptr, 0, &rs);
-    for (auto& s : g_sk.strokes) {
-        br->SetColor(SK_COLORS[s.color]);
-        if (s.pts.size() == 1) { rt->FillEllipse(D2D1::Ellipse({ o.x + s.pts[0].x * k, o.y + s.pts[0].y * k }, SK_PEN * k / 2, SK_PEN * k / 2), br); continue; }
-        ID2D1PathGeometry* g = nullptr;
-        if (!f || FAILED(f->CreatePathGeometry(&g))) continue;
-        ID2D1GeometrySink* sk = nullptr; g->Open(&sk);
-        auto P = [&](size_t i) { return D2D1::Point2F(o.x + s.pts[i].x * k, o.y + s.pts[i].y * k); };
-        sk->BeginFigure(P(0), D2D1_FIGURE_BEGIN_HOLLOW);
-        for (size_t i = 1; i + 1 < s.pts.size(); i++) {  // curva suave pelos pontos médios
-            auto a = P(i), b = P(i + 1);
-            sk->AddQuadraticBezier(D2D1::QuadraticBezierSegment(a, D2D1::Point2F((a.x + b.x) / 2, (a.y + b.y) / 2)));
-        }
-        sk->AddLine(P(s.pts.size() - 1));
-        sk->EndFigure(D2D1_FIGURE_END_OPEN); sk->Close(); sk->Release();
-        rt->DrawGeometry(g, br, SK_PEN * k, rs);
-        g->Release();
-    }
-    if (rs) rs->Release();
-    if (f) f->Release();
-}
-
-void DrawSketch(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Pal& pal) {
-    if (!g_sk.on) return;
-    SketchLayout();
-    auto c = ClientDip();
-    br->SetColor(D2D1::ColorF(0, 0, 0, g_dark ? 0.35f : 0.15f));
-    dc->FillRectangle(D2D1::RectF(0, 0, c.width, c.height), br);
-    auto& P = g_sk.panel;
-    for (int k = 6; k >= 1; k--) { br->SetColor(D2D1::ColorF(0, 0, 0, 0.04f)); dc->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(P.left - k, P.top - k + 4, P.right + k, P.bottom + k + 6), 16.f + k, 16.f + k), br); }
-    br->SetColor(g_dark ? D2D1::ColorF(0.17f, 0.17f, 0.18f) : D2D1::ColorF(0.965f, 0.965f, 0.97f));
-    dc->FillRoundedRectangle(D2D1::RoundedRect(P, 16, 16), br);
-    Text(dc, br, Tr(L"Desenho"), g_f13c, D2D1::RectF(P.left, P.top + 12, P.right, P.top + 34), pal.text);
-    br->SetColor(D2D1::ColorF(1, 1, 1));
-    dc->FillRoundedRectangle(D2D1::RoundedRect(g_sk.canvas, 8, 8), br);
-    br->SetColor(D2D1::ColorF(0, 0, 0, 0.12f));
-    dc->DrawRoundedRectangle(D2D1::RoundedRect(g_sk.canvas, 8, 8), br, 1);
-    dc->PushAxisAlignedClip(g_sk.canvas, D2D1_ANTIALIAS_MODE_ALIASED);
-    SketchStrokes(dc, br, { g_sk.canvas.left, g_sk.canvas.top }, 1);
-    dc->PopAxisAlignedClip();
-    if (g_sk.strokes.empty()) Text(dc, br, Tr(L"Desenhe aqui com o mouse ou a caneta"), g_f13c, g_sk.canvas, D2D1::ColorF(0, 0, 0, 0.30f));
-    for (int k = 0; k < 5; k++) {
-        D2D1_POINT_2F m{ (g_sk.sw[k].left + g_sk.sw[k].right) / 2, (g_sk.sw[k].top + g_sk.sw[k].bottom) / 2 };
-        br->SetColor(SK_COLORS[k]); dc->FillEllipse(D2D1::Ellipse(m, 9, 9), br);
-        if (k == g_sk.color) { br->SetColor(pal.text); dc->DrawEllipse(D2D1::Ellipse(m, 12, 12), br, 1.5f); }
-    }
-    auto button = [&](D2D1_RECT_F r, const wchar_t* t, bool primary, bool enabled) {
-        if (primary) br->SetColor(Accent()); else br->SetColor(g_dark ? D2D1::ColorF(1, 1, 1, 0.14f) : D2D1::ColorF(0, 0, 0, 0.07f));
-        dc->FillRoundedRectangle(D2D1::RoundedRect(r, 8, 8), br);
-        Text(dc, br, Tr(t), g_f13c, r, primary ? D2D1::ColorF(0, 0, 0, enabled ? 0.85f : 0.35f) : enabled ? pal.text : pal.text3);
-    };
-    bool any = !g_sk.strokes.empty();
-    button(g_sk.bUndo, L"Desfazer", false, any);
-    button(g_sk.bClear, L"Limpar", false, any);
-    button(g_sk.bCancel, L"Cancelar", false, true);
-    button(g_sk.bInsert, L"Inserir", true, any);
-}
-
-// grava o desenho (recortado em volta do que foi desenhado, com folga) como PNG em 2x e anexa na nota
-void SketchInsert() {
-    if (g_sk.strokes.empty()) { g_sk = Sketch{}; FocusEditor(); return; }
-    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-    for (auto& s : g_sk.strokes) for (auto& p : s.pts) { x0 = std::min(x0, p.x); y0 = std::min(y0, p.y); x1 = std::max(x1, p.x); y1 = std::max(y1, p.y); }
-    float m = 16, cw = g_sk.canvas.right - g_sk.canvas.left, ch = g_sk.canvas.bottom - g_sk.canvas.top;
-    x0 = std::max(0.f, x0 - m); y0 = std::max(0.f, y0 - m); x1 = std::min(cw, x1 + m); y1 = std::min(ch, y1 + m);
-    float W = std::max(40.f, x1 - x0), H = std::max(30.f, y1 - y0), sc = 2;
-    wchar_t name[64]; swprintf_s(name, L"\\desenho-%llx.png", (unsigned long long)store::Now());
-    std::wstring path = store::AttachDir() + name;
-    ID2D1Factory* f = nullptr; IWICImagingFactory* wic = nullptr; IWICBitmap* bmp = nullptr; ID2D1RenderTarget* rt = nullptr;
-    D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), nullptr, (void**)&f);
-    CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
-    bool ok = false;
-    if (f && wic && SUCCEEDED(wic->CreateBitmap((UINT)(W * sc), (UINT)(H * sc), GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp)) &&
-        SUCCEEDED(f->CreateWicBitmapRenderTarget(bmp, D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)), &rt))) {
-        ID2D1SolidColorBrush* br = nullptr; rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1), &br);
-        rt->BeginDraw();
-        rt->Clear(D2D1::ColorF(1, 1, 1));  // papel branco: o desenho aparece igual no claro e no escuro
-        SketchStrokes(rt, br, { -x0 * sc, -y0 * sc }, sc);
-        ok = SUCCEEDED(rt->EndDraw());
-        br->Release();
-        IWICStream* st = nullptr; IWICBitmapEncoder* enc = nullptr; IWICBitmapFrameEncode* fe = nullptr;
-        if (ok && SUCCEEDED(wic->CreateStream(&st)) && SUCCEEDED(st->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
-            SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) && SUCCEEDED(enc->Initialize(st, WICBitmapEncoderNoCache)) &&
-            SUCCEEDED(enc->CreateNewFrame(&fe, nullptr)) && SUCCEEDED(fe->Initialize(nullptr))) {
-            fe->SetSize((UINT)(W * sc), (UINT)(H * sc));
-            WICPixelFormatGUID pf = GUID_WICPixelFormat32bppPBGRA; fe->SetPixelFormat(&pf);
-            ok = SUCCEEDED(fe->WriteSource(bmp, nullptr)) && SUCCEEDED(fe->Commit()) && SUCCEEDED(enc->Commit());
-        } else ok = false;
-        if (fe) fe->Release(); if (enc) enc->Release(); if (st) st->Release();
-    }
-    if (rt) rt->Release(); if (bmp) bmp->Release(); if (wic) wic->Release(); if (f) f->Release();
-    Log(L"desenho: %ls %ls", path.c_str(), ok ? L"gravado" : L"FALHOU");
-    g_sk = Sketch{};
-    if (ok) editor::InsertAttachment(path);
-    FocusEditor();
-    Invalidate();
-}
-
-bool SketchMouse(UINT m, D2D1_POINT_2F p) {  // true: a folha de desenho tratou
-    if (!g_sk.on) return false;
-    SketchLayout();
-    D2D1_POINT_2F q{ p.x - g_sk.canvas.left, p.y - g_sk.canvas.top };
-    if (m == WM_LBUTTONDOWN) {
-        if (In(g_sk.canvas, p)) { Sketch::Stroke s; s.color = g_sk.color; s.pts.push_back(q); g_sk.strokes.push_back(s); g_sk.drawing = true; SetCapture(g_hwnd); }
-        else if (In(g_sk.bUndo, p)) { if (!g_sk.strokes.empty()) g_sk.strokes.pop_back(); }
-        else if (In(g_sk.bClear, p)) g_sk.strokes.clear();
-        else if (In(g_sk.bCancel, p)) { g_sk = Sketch{}; FocusEditor(); }
-        else if (In(g_sk.bInsert, p)) SketchInsert();
-        else for (int k = 0; k < 5; k++) if (In(g_sk.sw[k], p)) g_sk.color = k;
-    } else if (m == WM_MOUSEMOVE && g_sk.drawing && !g_sk.strokes.empty()) {
-        auto& v = g_sk.strokes.back().pts;
-        q.x = std::clamp(q.x, 0.f, g_sk.canvas.right - g_sk.canvas.left); q.y = std::clamp(q.y, 0.f, g_sk.canvas.bottom - g_sk.canvas.top);
-        if (std::hypot(q.x - v.back().x, q.y - v.back().y) >= 0.8f) v.push_back(q);
-    } else if (m == WM_LBUTTONUP) { g_sk.drawing = false; if (GetCapture() == g_hwnd) ReleaseCapture(); }
-    Invalidate();
-    return true;
-}
+#include "folha.inc"
 
 void ClickButton(int b) {
     switch (b) {
@@ -1703,7 +1622,7 @@ void ClickButton(int b) {
     case B_CHECK: editor::ToggleList(L_CHECK); g_focus = F_EDITOR; editor::Focus(true); break;
     case B_TABLE: TableCmd(); break;
     case B_ATTACH: case B_MEDIA: AttachCmd(); break;
-    case B_MARKUP: if (editor::Current()) { g_sk = Sketch{}; g_sk.on = true; editor::Focus(false); } break;
+    case B_MARKUP: if (editor::Current()) { SketchReset(true); editor::Focus(false); } break;
     case B_WRITING: WritingMenu(); break;
     case B_SEARCH: OpenSearch(); break;
     case B_FOLDER: NewFolderCmd(); break;
@@ -1758,6 +1677,7 @@ LRESULT HitTestNC(HWND h, LPARAM l) {
     }
     D2D1_POINT_2F p{ pt.x / g_scale, pt.y / g_scale };
     if (g_sheet.on || g_fmtOpen) return HTCLIENT;
+    if (g_sk.on) return SketchCaption(p) ? HTCAPTION : HTCLIENT;  // desenho: a barra dele arrasta a janela
     if (p.y < TOOLBAR_H && !OverLights(p) && HitBtn(p) < 0 && !(g_searchOpen && In(g_searchRect, p))) return HTCAPTION;
     return HTCLIENT;
 }
@@ -1876,6 +1796,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_APP_TRAZER: Bring(); return 0;
     case WM_APP_IA: IaPronta((IaFeito*)l); return 0;
     case WM_TIMER:
+        if (w == T_HOLD) { SketchHold(); return 0; }
         if (w == T_FRONT) {  // abriu pelo Launchpad: confere de novo depois da animação de fechar
             KillTimer(h, T_FRONT);
             if (GetForegroundWindow() != h && ShellInFront()) Bring();
@@ -1895,6 +1816,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         POINT pt{ GET_X_LPARAM(l), GET_Y_LPARAM(l) }; ScreenToClient(h, &pt);
         D2D1_POINT_2F p{ pt.x / g_scale, pt.y / g_scale };
         float dy = GET_WHEEL_DELTA_WPARAM(w) / 120.f * 48;
+        if (SketchWheel(p, GET_WHEEL_DELTA_WPARAM(w) / 120.f)) return 0;
         if (g_sheet.on) return 0;
         if (EditorShown() && p.x >= EdL()) editor::OnWheel(dy);
         else if (p.x < SideW()) g_sideScroll = std::max(0.f, g_sideScroll - dy);
@@ -1905,6 +1827,9 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         Invalidate();
         return 0;
     }
+    case WM_POINTERDOWN: case WM_POINTERUPDATE: case WM_POINTERUP: case WM_POINTERENTER: case WM_POINTERLEAVE:
+        if (SketchPointer(m, w)) return 0;
+        break;
     case WM_MOUSEMOVE: {
         D2D1_POINT_2F p{ GET_X_LPARAM(l) / g_scale, GET_Y_LPARAM(l) / g_scale };
         if (SketchMouse(m, p)) return 0;
@@ -2093,13 +2018,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_KEYDOWN: case WM_SYSKEYDOWN: {
         bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0, alt = GetKeyState(VK_MENU) < 0;
-        if (g_sk.on) {  // folha de desenho: Esc cancela, Enter insere, Ctrl+Z desfaz o último traço
-            if (w == VK_ESCAPE) { g_sk = Sketch{}; FocusEditor(); }
-            else if (w == VK_RETURN) SketchInsert();
-            else if (ctrl && w == 'Z' && !g_sk.strokes.empty()) g_sk.strokes.pop_back();
-            Invalidate();
-            return 0;
-        }
+        if (SketchKey(w, ctrl, shift)) return 0;  // folha de desenho (folha.inc)
         if (g_sheet.on) {
             if (w == VK_ESCAPE) g_sheet = Sheet{};
             else if (w == VK_RETURN) { auto act = g_sheet.act; g_sheet = Sheet{}; if (act) act(); }
@@ -2358,21 +2277,157 @@ int Capture(const std::wstring& out, int noteIdx, bool aa) {
         else if (c == L"gravar") store::SaveAllDirty();
         else if (c == L"inicio") { editor::OnKey(VK_HOME); }
         else if (c.rfind(L"anexo:", 0) == 0) editor::InsertAttachment(store::AddAttachment(c.substr(6)));
-        else if (c.rfind(L"folha:", 0) == 0) {  // a folha de desenho aberta com n traços (para a foto)
-            g_sk = Sketch{}; g_sk.on = true; SketchLayout();
+        else if (c.rfind(L"folha:", 0) == 0) {  // a folha de desenho aberta com n traços de teste (todas as tintas)
+            SketchReset(true); SketchLayout();
             for (int k = 0; k < _wtoi(c.substr(6).c_str()); k++) {
-                Sketch::Stroke s; s.color = k % 5;
-                for (int t = 0; t <= 50; t++) s.pts.push_back({ 30.f + t * 10.f, 50.f + k * 40 + 30 * std::sin(t / 5.f) });
+                g_sk.tool = k % tinta::TOOL_COUNT;
+                Sketch::Stroke s = g_sk.Make(k % 4 == 3); s.color = SK_COLORS[k % 5];
+                for (int t = 0; t <= 50; t++) s.pts.push_back({ 60.f + t * 10.f, 90.f + k * 44 + 30 * std::sin(t / 5.f), 0.15f + 0.8f * std::sin(t / 50.f * 3.1416f) });
                 g_sk.strokes.push_back(s);
             }
+            g_sk.tool = tinta::PEN;
+        }
+        else if (c == L"regua") { g_sk.ruler.on = true; SketchLayout(); }
+        else if (c.rfind(L"papel:", 0) == 0) g_sk.pattern = _wtoi(c.substr(6).c_str());
+        else if (c.rfind(L"papelcor:", 0) == 0) g_sk.paper = _wtoi(c.substr(9).c_str());
+        else if (c.rfind(L"tema:", 0) == 0) g_sk.theme = _wtoi(c.substr(5).c_str());
+        else if (c.rfind(L"zoom:", 0) == 0) { SketchLayout(); auto& C = g_sk.canvas; SkZoomAt({ (C.left + C.right) / 2, (C.top + C.bottom) / 2 }, _wtoi(c.substr(5).c_str()) / 100.f); }
+        else if (c == L"mao") g_sk.hand = true;
+        else if (c.rfind(L"foto:", 0) == 0) { SketchLayout(); SkPlacePhoto(c.substr(5)); }
+        else if (c.rfind(L"girar:", 0) == 0) { g_sk.photo.rot = _wtoi(c.substr(6).c_str()) * 3.14159265f / 180; SkChanged(); }
+        else if (c == L"recorte") {  // um recorte em forma de gota (como uma volta feita à mão)
+            g_sk.photo.clip.clear();
+            for (int t = 0; t < 64; t++) { float u = t / 64.f * 6.2832f; g_sk.photo.clip.push_back({ 0.5f + 0.38f * std::cos(u) * (1 + 0.15f * std::sin(u * 2)), 0.5f + 0.42f * std::sin(u) }); }
+            SkChanged();
+        }
+        else if (c == L"soltar") g_sk.photoSel = false;
+        else if (c == L"cortando") g_sk.crop = true;
+        else if (c.rfind(L"cursores:", 0) == 0) {  // os cursores lado a lado, sobre papel branco e escuro, num PNG
+            struct K { int kind; D2D1_COLOR_F c; float px; } ks[] = {
+                { CUR_DOT, SK_COLORS[0], 3 }, { CUR_DOT, SK_COLORS[4], 5 }, { CUR_DOT, SK_COLORS[1], 12 }, { CUR_RING, SK_COLORS[4], 15 },
+                { CUR_RING, SK_COLORS[1], 40 }, { CUR_CHISEL, SK_COLORS[3], 24 }, { CUR_CHISEL, SK_COLORS[2], 48 }, { CUR_DASH, SK_BLUE, 14 }, { CUR_RING, D2D1::ColorF(0x8e8e93), 14 } };
+            const int cell = 72, n = (int)(sizeof(ks) / sizeof(ks[0]));
+            std::vector<UINT32> img((size_t)cell * n * cell * 2);
+            for (int row = 0; row < 2; row++) for (int y = 0; y < cell; y++) for (int x = 0; x < cell * n; x++) img[(size_t)(row * cell + y) * cell * n + x] = row ? 0xFF1C1C1E : 0xFFFFFFFF;
+            for (int i = 0; i < n; i++) {
+                int N = SkCursorSize(ks[i].px);
+                std::vector<UINT32> px((size_t)N * N);
+                SkCursorPixels(ks[i].kind, ks[i].c, ks[i].px, N, px.data());
+                for (int row = 0; row < 2; row++)
+                    for (int y = 0; y < N && y < cell; y++) for (int x = 0; x < N && x < cell; x++) {
+                        UINT32 s2 = px[(size_t)y * N + x]; float a2 = (s2 >> 24) / 255.f;
+                        size_t at = (size_t)(row * cell + (cell - N) / 2 + y) * cell * n + i * cell + (cell - N) / 2 + x;
+                        UINT32 d = img[at];
+                        auto ch = [&](int sh) { return (UINT32)std::min(255.f, ((s2 >> sh) & 255) + ((d >> sh) & 255) * (1 - a2)); };
+                        img[at] = 0xFF000000 | (ch(16) << 16) | (ch(8) << 8) | ch(0);
+                    }
+            }
+            IWICImagingFactory* wic = nullptr; IWICBitmap* bmp = nullptr;
+            CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
+            if (wic && SUCCEEDED(wic->CreateBitmapFromMemory(cell * n, cell * 2, GUID_WICPixelFormat32bppPBGRA, cell * n * 4, (UINT)img.size() * 4, (BYTE*)img.data(), &bmp))) {
+                SkSavePng(wic, bmp, cell * n, cell * 2, c.substr(9)); bmp->Release();
+            }
+            if (wic) wic->Release();
+        }
+        else if (c == L"junco") {  // pena de junco: laços e retas em várias direções
+            g_sk.tool = tinta::REEDPEN;
+            for (int k = 0; k < 3; k++) {
+                Sketch::Stroke s = g_sk.Make(false); s.color = SK_COLORS[k == 1 ? 1 : 0];
+                for (int t = 0; t <= 120; t++) { float u = t / 120.f, a = u * 6.2832f * 2.2f; s.pts.push_back({ 100 + k * 330 + u * 220 + 45 * std::cos(a + k), 200 + 70 * std::sin(a), 0.6f }); }
+                g_sk.strokes.push_back(s);
+            }
+            SkChanged();
+        }
+        else if (c == L"pincel") {  // pincel de tinta: com pressão subindo e descendo, e com o mouse (velocidade)
+            g_sk.tool = tinta::BRUSHPEN;
+            for (int k = 0; k < 3; k++) {
+                Sketch::Stroke s = g_sk.Make(k == 2); s.color = SK_COLORS[k == 1 ? 1 : 0];
+                for (int t = 0; t <= 80; t++) { float u = t / 80.f; s.pts.push_back({ 100 + u * 700 + (k == 2 ? t * t * 0.03f : 0), 150 + k * 140 + 55 * std::sin(u * 9.4f), 0.1f + 0.85f * std::pow(std::sin(u * 3.14f), 1.5f) }); }
+                g_sk.strokes.push_back(s);
+            }
+            SkChanged();
+        }
+        else if (c == L"aquarela") {  // pinceladas de aquarela: curva, reta curta e um ponto, em três cores
+            g_sk.tool = tinta::WATERCOLOR;
+            for (int k = 0; k < 3; k++) {
+                Sketch::Stroke s = g_sk.Make(k == 2); s.color = SK_COLORS[k + 1];
+                for (int t = 0; t <= 60; t++) { float u = t / 60.f; s.pts.push_back({ 120 + u * 600, 160 + k * 130 + 50 * std::sin(u * 6.28f), 0.3f + 0.6f * std::sin(u * 3.14f) }); }
+                g_sk.strokes.push_back(s);
+                Sketch::Stroke l = g_sk.Make(true); l.color = SK_COLORS[k + 1];
+                for (int t = 0; t <= 20; t++) l.pts.push_back({ 820 + t * 9.f, 150 + k * 130 + t * 2.f, 0.5f });
+                g_sk.strokes.push_back(l);
+            }
+            SkChanged();
+        }
+        else if (c == L"marcador") {  // escrita a caneta e o marcador passando por cima (fica por baixo, como marca-texto)
+            g_sk.tool = tinta::PEN;
+            for (int k = 0; k < 3; k++) {
+                Sketch::Stroke s = g_sk.Make(false);
+                for (int t = 0; t <= 80; t++) { float u = t / 80.f; s.pts.push_back({ 120 + u * 520, 600 + k * 36 + 8 * std::sin(u * 40), 0.5f + 0.3f * std::sin(u * 9) }); }
+                g_sk.strokes.push_back(s);
+            }
+            g_sk.tool = tinta::MARKER;
+            Sketch::Stroke m = g_sk.Make(true);
+            for (int t = 0; t <= 60; t++) { float u = t / 60.f; m.pts.push_back({ 110 + u * 540, 636 + 3 * std::sin(u * 7), 0.5f }); }
+            g_sk.strokes.push_back(m);
+            Sketch::Stroke m2 = g_sk.Make(true); m2.color = SK_COLORS[1];
+            for (int t = 0; t <= 60; t++) { float u = t / 60.f; m2.pts.push_back({ 700 + u * 300, 560 + u * 140 + 30 * std::sin(u * 6), 0.5f }); }
+            g_sk.strokes.push_back(m2);
+            SkChanged();
+        }
+        else if (c == L"reeditar") {  // grava (como o botão vermelho) e abre de novo o mesmo desenho
+            SketchInsert();
+            std::wstring png = g_sk.lastSaved;
+            Log(L"reeditar: %ls %ls", png.c_str(), SkOpenDrawing(png) ? L"abriu" : L"FALHOU");
+            Sketch::Stroke s = g_sk.Make(false); s.color = SK_COLORS[4];
+            for (int t = 0; t <= 40; t++) s.pts.push_back({ 100.f + t * 12, 100.f + 40 * std::sin(t / 6.f), 0.6f });
+            g_sk.strokes.push_back(s); SkChanged();
+        }
+        else if (c == L"pluma") {  // caneta-tinteiro: letras e laços em várias direções, com pressão
+            g_sk.tool = tinta::FOUNTAIN; g_sk.size[tinta::FOUNTAIN] = 3;
+            for (int k = 0; k < 4; k++) {
+                Sketch::Stroke s = g_sk.Make(k == 3);
+                for (int t = 0; t <= 120; t++) {
+                    float u = t / 120.f, a = u * 6.2832f * 2.2f;
+                    s.pts.push_back({ 80 + k * 280 + u * 200 + 40 * std::cos(a + k), 160 + 60 * std::sin(a) + k * 6, 0.25f + 0.7f * std::sin(u * 3.1416f) });
+                }
+                g_sk.strokes.push_back(s);
+                Sketch::Stroke l = g_sk.Make(k == 3);  // traço reto curto, começando em cada direção
+                float ang = k * 3.1416f / 4 + 0.3f;
+                for (int t = 0; t <= 30; t++) l.pts.push_back({ 180 + k * 280 + std::cos(ang) * t * 4, 380 + std::sin(ang) * t * 4, 0.3f + 0.02f * t });
+                g_sk.strokes.push_back(l);
+            }
+        }
+        else if (c.rfind(L"balao:", 0) == 0) g_sk.pop = _wtoi(c.substr(6).c_str());
+        else if (c.rfind(L"ferramenta:", 0) == 0) g_sk.tool = _wtoi(c.substr(11).c_str());
+        else if (c == L"selecionar") { SketchLayout(); g_sk.lasso = { { 40, 60 }, { 700, 60 }, { 700, 200 }, { 40, 200 } }; SkFinishLasso(); }
+        else if (c == L"borracha") {  // passa a borracha de pixels de cima a baixo no meio
+            g_sk.eraseObject = false;
+            for (float y = 0; y < 900; y += 3) SkEraseAt({ 330, y });
+        }
+        else if (c == L"formas") {  // um círculo e um retângulo tortos, reconhecidos como no "segurar parado"
+            g_sk.tool = tinta::PEN;
+            Sketch::Stroke a = g_sk.Make(true), r = g_sk.Make(true);
+            for (int t = 0; t <= 60; t++) { float u = t / 60.f * 6.2832f; a.pts.push_back({ 900 + 90 * std::cos(u) + 6 * std::sin(u * 5), 200 + 70 * std::sin(u) + 5 * std::cos(u * 3), 0.5f }); }
+            for (int t = 0; t <= 80; t++) { float u = t / 80.f * 4; float x, y;
+                if (u < 1) { x = 820 + u * 180; y = 360 + 4 * std::sin(u * 9); } else if (u < 2) { x = 1000 + 3 * std::sin(u * 7); y = 360 + (u - 1) * 110; }
+                else if (u < 3) { x = 1000 - (u - 2) * 180; y = 470 + 3 * std::sin(u * 8); } else { x = 820 + 4 * std::sin(u * 6); y = 470 - (u - 3) * 110; }
+                r.pts.push_back({ x, y, 0.5f }); }
+            Sketch::Stroke a0 = a, r0 = r;
+            a.pts = tinta::RecognizeShape(a.pts); r.pts = tinta::RecognizeShape(r.pts);
+            a0.color = r0.color = D2D1::ColorF(0, 0, 0, 0.25f);
+            for (auto& q : a0.pts) q.y += 0; for (auto& q : r0.pts) q.y += 0;
+            g_sk.strokes.push_back(a0); g_sk.strokes.push_back(r0);
+            if (!a.pts.empty()) { a.color = SK_COLORS[1]; g_sk.strokes.push_back(a); }
+            if (!r.pts.empty()) { r.color = SK_COLORS[4]; g_sk.strokes.push_back(r); }
         }
         else if (c.rfind(L"desenho:", 0) == 0) {
-            g_hwnd = nullptr; g_sk = Sketch{}; g_sk.on = true;
+            g_hwnd = nullptr; SketchReset(true);
             float W = g_capSize.width, H = g_capSize.height;
             g_sk.canvas = { (W - 600) / 2, 100, (W + 600) / 2, H - 100 };
             for (int k = 0; k < _wtoi(c.substr(8).c_str()); k++) {
-                Sketch::Stroke s; s.color = k % 5;
-                for (int t = 0; t <= 40; t++) s.pts.push_back({ 40.f + t * 9.f, 60.f + k * 30 + 25 * std::sin(t / 4.f) });
+                Sketch::Stroke s = g_sk.Make(true); s.color = SK_COLORS[k % 5];
+                for (int t = 0; t <= 40; t++) s.pts.push_back({ 40.f + t * 9.f, 60.f + k * 30 + 25 * std::sin(t / 4.f), 0.5f });
                 g_sk.strokes.push_back(s);
             }
             SketchInsert();
