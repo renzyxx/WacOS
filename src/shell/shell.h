@@ -640,6 +640,8 @@ struct Piece {  // px, nas coordenadas da janela
     D2D1_RECT_F r; float radius;
     // gosma (comum/vidro.h): a peça é a cápsula `cap` unida aos círculos `circ` (o Spotlight soltando os círculos)
     bool goo = false; D2D1_RECT_F cap{}; float capR = 0; std::vector<D2D1_ELLIPSE> circ; unsigned broken = 0;
+    // entalhe (Ilha Dinâmica em estilo Notch): orelhas côncavas em cima (notchRt) e cantos redondos embaixo (notchRb), px
+    bool notch = false; float notchRt = 0; float notchRb = 0;
 };
 // várias peças de vidro soltas numa janela só (módulos da Central): cada uma com a lente dela e a tinta;
 // o contorno fica por conta de quem desenha por cima
