@@ -57,6 +57,8 @@ struct Result {
 // full = todas as opções na ordem do Windows (Shift+clique direito).
 Result Show(HWND owner, POINT screenPt, const std::wstring& folder,
             const std::vector<std::wstring>& paths, bool full);
+Result Show(HWND owner, POINT screenPt, const std::wstring& folder,
+            const std::vector<std::wstring>& paths, bool full, bool interceptUninstall);
 
 // Menu com itens do próprio app (Agrupar por, Ações...), no mesmo visual. Devolve o id
 // escolhido ou 0. Submenus de um nível.

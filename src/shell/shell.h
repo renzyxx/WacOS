@@ -355,6 +355,8 @@ void Stop();
 // icon: "" = Lixeira, "pack:<nome>" = icones\sequoia\<nome>.png, senão o caminho de um programa
 // no: o texto do outro botão ("" = Cancelar). Devolve false se já havia um alerta aberto (este não aparece)
 bool Confirm(const std::wstring& title, const std::wstring& info, const std::wstring& yes, std::function<void()> onYes, const std::wstring& icon = L"", const std::wstring& no = L"");
+bool Prompt(HWND owner, const std::wstring& title, const std::wstring& info, const std::wstring& yes,
+            std::function<void()> onYes, const std::wstring& icon, const std::wstring& cancel);
 }
 namespace progresso {  // janela de progresso do Windows (copiar, mover, apagar...) trocada pela do Finder (progresso.cpp)
 bool Create(HINSTANCE hi);

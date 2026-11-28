@@ -32,6 +32,7 @@ static ID2D1Bitmap* StyledBitmap(ID2D1RenderTarget* rt, UINT w, UINT h, const st
 #include <thread>
 #include "../comum/idioma.h"
 #include "../menu/context_menu.h"
+#include "installed_apps.h"
 
 namespace {
 
@@ -1008,14 +1009,16 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
                                           { Tr(L"Alterar Ícone…"), 3, false, false, false, L"", {}, 0xEB9F } };
         if (apps::HasCustomIcon(name, exe)) extra.push_back({ Tr(L"Restaurar Ícone Original"), 4, false, false, false, L"", {}, 0xE7A7 });
         extra.push_back({ Tr(L"Renomear…"), 5, false, false, false, L"", {}, 0xE8AC });  // pedido no Discord
+        extra.push_back({ installed_apps::MenuLabel(), 6, false, false, false, L"", {}, 0xE74D });
         ctxmenu::ExtraNext(extra);
-        auto res = ctxmenu::Show(h, sp, L"shell:AppsFolder", { path }, GetKeyState(VK_SHIFT) < 0);
+        auto res = ctxmenu::Show(h, sp, L"shell:AppsFolder", { path }, GetKeyState(VK_SHIFT) < 0, true);
         ctxmenu::ExtraNext({});
         Log(L"launchpad: menu de %ls%ls", name.c_str(), res.chosen ? L" (comando escolhido)" : L"");
         if (res.extra == 2) { launchpad::Ocultar(name); { std::lock_guard<std::mutex> lk(g_mu); Filter(); } Paint(); return 0; }
         if (res.extra == 3) { Close(); apps::ChooseIcon(name, exe); return 0; }  // o Launchpad cobre a tela: fecha antes da janela de Abrir
         if (res.extra == 4) { apps::RestoreIcon(name, exe); return 0; }
         if (res.extra == 5) { Close(); apps::Renomear(name, exe); return 0; }
+        if (res.extra == 6 || res.verb == L"uninstall") { Close(); installed_apps::Open(name); return 0; }
         if (res.chosen) Close();
         return 0;
     }
