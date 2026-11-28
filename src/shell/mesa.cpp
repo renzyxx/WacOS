@@ -273,8 +273,14 @@ void CloseGhostExplorers(double minAge, const wchar_t* why) {
     }
 }
 
-void StartExplorer(const wchar_t* why) {
+// fundo = chamado pelo Tick da thread da interface: a espera pela mesa do Explorador (até 16,5 s) vai para outra thread.
+// Antes ela ficava na thread da interface e, no login com o Shell registrado, o WacOS ficava parado 16 s inteiros quando
+// o Explorador demorava (issue #199: a sentinela pegou 16453 ms nesse Sleep). Ao sair (e no vigia) continua esperando:
+// o processo pode acabar antes de uma thread devolver o valor do Winlogon.
+std::atomic<bool> g_trocandoShell;
+void StartExplorer(const wchar_t* why, bool fundo = false) {
     if (ExplorerProgman()) return;
+    if (g_trocandoShell) return;  // outra abertura ainda está esperando a mesa dele
     CloseGhostExplorers(0, L"antes de abrir o Explorador");  // senão o Explorador novo trava
     // Com o WacOSShell como shell do Windows, o explorer.exe se abre só como janela de pasta. Por alguns
     // segundos o valor volta a ser explorer.exe (ele confere ao abrir) e depois é devolvido.
@@ -293,10 +299,16 @@ void StartExplorer(const wchar_t* why) {
         Log(L"mesa: Explorador aberto de novo (%ls)", why);
     } else Log(L"mesa: ERRO abrindo o Explorador (%lu)", GetLastError());
     if (swap) {
-        for (int i = 0; i < 60 && !ExplorerProgman(); i++) Sleep(250);  // até 15 s pela mesa dele
-        Sleep(1500);
-        RegSetKeyValueW(HKEY_CURRENT_USER, WINLOGON, L"Shell", REG_SZ, saved.c_str(), (DWORD)(saved.size() + 1) * 2);
-        Log(L"mesa: Winlogon Shell devolvido (%ls); Explorador %ls", saved.c_str(), ExplorerProgman() ? L"é a mesa" : L"NÃO virou a mesa");
+        auto espera = [saved] {
+            for (int i = 0; i < 60 && !ExplorerProgman(); i++) Sleep(250);  // até 15 s pela mesa dele
+            Sleep(1500);
+            RegSetKeyValueW(HKEY_CURRENT_USER, WINLOGON, L"Shell", REG_SZ, saved.c_str(), (DWORD)(saved.size() + 1) * 2);
+            Log(L"mesa: Winlogon Shell devolvido (%ls); Explorador %ls", saved.c_str(), ExplorerProgman() ? L"é a mesa" : L"NÃO virou a mesa");
+            g_trocandoShell = false;
+        };
+        g_trocandoShell = true;
+        if (fundo) std::thread(espera).detach();
+        else espera();
     }
 }
 
@@ -1813,7 +1825,7 @@ void Tick() {
     if (g_standalone) {  // estava sem o Explorador e o ajuste voltou para 1: devolve a mesa a ele
         LeaveShell();
         DestroyDesk();
-        StartExplorer(L"ajuste explorer=1");
+        StartExplorer(L"ajuste explorer=1", true);
         g_weClosed = false;
         return;
     }
@@ -1824,7 +1836,7 @@ void Tick() {
     if ((registered || g_fundo || shell::SoDock()) && now - g_explorerGoneAt > 2000 && (!lastStart || now - lastStart > 30000)) {  // só Dock: a área de trabalho é a dele
         lastStart = now;
         if (DeskExists()) DestroyDesk();
-        StartExplorer(L"explorer=1 com o Shell registrado");
+        StartExplorer(L"explorer=1 com o Shell registrado", true);
         return;
     }
     if (!DeskExists() && now - g_explorerGoneAt > 3000) { Log(L"mesa: Explorador ausente; mostrando a mesa do Shell"); CreateDesk(); }
@@ -2292,7 +2304,12 @@ bool mesa::Watchdog(const wchar_t* cmdLine) {
         // de cursores é relido do registro
         if (WaitForSingleObject(ev, 0) != WAIT_OBJECT_0) SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);
         if (!done && r == WAIT_OBJECT_0 + 1 && WaitForSingleObject(ev, 0) != WAIT_OBJECT_0) {
-            vlog(L"o Shell sumiu sem sair direito");
+            // o código de saída diz o porquê (issue #233, nada no log nem no Visualizador de Eventos): 0xC0000409 = falha
+            // rápida (estouro de buffer, std::terminate), 0xC0000374 = heap corrompida, 0xC00000FD = pilha cheia, 3 = abort,
+            // 1 ou outro número pequeno = encerrado por outro programa (TerminateProcess)
+            DWORD codigo = 0;
+            if (GetExitCodeProcess(proc, &codigo)) { wchar_t m[96]; swprintf_s(m, L"o Shell sumiu sem sair direito (código de saída 0x%08lX)", codigo); vlog(m); }
+            else vlog(L"o Shell sumiu sem sair direito");
             // fechado à força (Gerenciador de Tarefas) com o Explorador no fundo: a barra dele ficava escondida e o
             // usuário ficava sem barra de tarefas nenhuma (issue #37)
             EnumWindows([](HWND h, LPARAM) -> BOOL {

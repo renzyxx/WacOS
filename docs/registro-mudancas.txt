@@ -2098,3 +2098,16 @@ Compilado (tudo), instalado, Shell e reserva do Finder reiniciados às 23:07 sem
     Shell abre como shell já roda (abriam duas vezes).
   Compilado (build.cmd e build.cmd janelas). Não instalado.
   DESFAZER: reverter o commit e compilar (build.cmd e build.cmd janelas).
+[2026-11-28 16:10] Issues novos depois da build-57 (C++ e Rust):
+  - #199 (interface parada): no login com o Shell registrado, StartExplorer esperava até 16,5 s pela mesa do Explorador
+    na thread da interface (a sentinela do log do usuário pegou 16453 ms). Chamado pelo Tick agora espera numa
+    thread (mesa.cpp / mesa.rs); ao sair e no vigia continua esperando (o processo pode acabar antes).
+  - #237: ícone fixado na barra de menus guardado como "@programa" (+ "#{GUID}" se tiver) em vez da dica; apps que
+    trocam a dica (Vikey) não voltam mais para a setinha. As chaves antigas (dica) continuam valendo (menubar).
+  - #236: Ajustes do Sistema lembra posição e tamanho (%APPDATA%\Shell\ajustes-janela.txt, fora do ajustes.txt).
+  - #240: clicar em Multicor gravava "azul" (a bolinha pulava para o azul); agora grava "multicor" (a cor continua azul).
+  - #233: o vigia registra o código de saída quando o Shell some sem sair direito.
+  - #238 (só Rust): a edição em Rust não tem tools\, então a Atualização de Software ficava "desconhecida"/"não deu
+    para conferir". Confere e atualiza pela instalação normal (Programs\WacOS, WacOSSetup --atualizar).
+  Compilado (build.cmd shell, build.cmd ajustes; build-rust.ps1 -Zip). Não instalado.
+  DESFAZER: reverter os commits (main e claude/rust-port-teste-23da8b) e compilar de novo.

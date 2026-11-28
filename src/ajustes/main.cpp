@@ -2054,6 +2054,40 @@ void LigaRelogio(HWND h) {
 }
 
 bool PedidoRenomear(const std::wstring& id);  // Renomear… do Dock e do Launchpad (mais abaixo)
+// Posição e tamanho da janela entre uma abertura e outra (issue #236): %APPDATA%\Shell\ajustes-janela.txt com
+// "x y largura altura" em px. Fora do ajustes.txt de propósito: o Shell relê tudo a cada gravação dele.
+static std::wstring JanelaArq() {
+    wchar_t ad[MAX_PATH] = {};
+    if (!GetEnvironmentVariableW(L"APPDATA", ad, MAX_PATH)) return L"";
+    return std::wstring(ad) + L"\\Shell\\ajustes-janela.txt";
+}
+static void GuardaJanela(HWND h) {
+    if (!h || IsZoomed(h) || IsIconic(h) || !IsWindowVisible(h)) return;
+    RECT r; if (!GetWindowRect(h, &r)) return;
+    std::wstring f = JanelaArq(); if (f.empty()) return;
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, f.c_str(), L"w") || !fp) return;
+    fwprintf(fp, L"%ld %ld %ld %ld\n", r.left, r.top, r.right - r.left, r.bottom - r.top);
+    fclose(fp);
+}
+// a guardada, se ainda cabe num monitor (o monitor pode ter saído) e não é menor que o mínimo
+static bool LeJanela(int& x, int& y, int& w, int& hh, float scale) {
+    std::wstring f = JanelaArq(); if (f.empty()) return false;
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, f.c_str(), L"r") || !fp) return false;
+    int a = 0, b = 0, c = 0, d = 0;
+    int n = fwscanf_s(fp, L"%d %d %d %d", &a, &b, &c, &d);
+    fclose(fp);
+    if (n != 4 || c < (int)(680 * scale) || d < (int)(420 * scale)) return false;
+    RECT r{ a, b, a + c, b + d }, inter;
+    HMONITOR mon = MonitorFromRect(&r, MONITOR_DEFAULTTONULL);
+    MONITORINFO mi{ sizeof(mi) };
+    if (!mon || !GetMonitorInfoW(mon, &mi) || !IntersectRect(&inter, &r, &mi.rcWork)) return false;
+    if (inter.right - inter.left < 200 || inter.bottom - inter.top < 100) return false;  // quase toda fora da tela
+    x = a; y = std::max<int>(b, mi.rcWork.top); w = std::min<int>(c, mi.rcWork.right - mi.rcWork.left); hh = std::min<int>(d, mi.rcWork.bottom - mi.rcWork.top);
+    return true;
+}
+
 LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_QUADRO) {
         g_quadroPendente = false;
@@ -2300,7 +2334,8 @@ LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         Invalidate();
         return 0;
     }
-    case WM_CLOSE: DestroyWindow(h); return 0;
+    case WM_EXITSIZEMOVE: GuardaJanela(h); break;
+    case WM_CLOSE: GuardaJanela(h); DestroyWindow(h); return 0;
     case WM_DESTROY: shadow::Destroy(); PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -2447,6 +2482,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int) {
     const bool th0 = tahoe::On(), gg0 = th0 && tahoe::Golden();  // Tahoe: 801 × 625 (guia, seção 43); macOS 27: 740 × 690 (captura)
     int ww = (int)((gg0 ? 740 : th0 ? 801 : 715) * g_scale), wh = (int)(std::min(gg0 ? 690.f : th0 ? 625.f : 640.f, (wa.bottom - wa.top) / g_scale - 60) * g_scale);
     int wx = wa.left + (wa.right - wa.left - ww) / 2, wy = wa.top + (wa.bottom - wa.top - wh) / 2 - (int)(20 * g_scale);
+    if (LeJanela(wx, wy, ww, wh, g_scale)) wa.top = std::min<LONG>(wa.top, wy);  // como estava ao fechar (issue #236)
     g_hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, wc.lpszClassName, TrPick(L"Ajustes do Sistema", L"System Settings"), WS_OVERLAPPEDWINDOW,
                              wx, std::max<int>(wy, wa.top), ww, wh, nullptr, nullptr, hi, nullptr);
     ampliacao::Janela(g_hwnd);  // abrir e fechar animados (o Shell anima)

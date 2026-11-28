@@ -916,7 +916,7 @@ Page Aparencia() {
     acc.clickAt = [](D2D1_POINT_2F pt, D2D1_RECT_F rr) {
         float x = rr.right - 10 - 9 * 22 + 8;
         for (int k = 0; k < 9; k++, x += 22)
-            if (std::fabs(pt.x - x) <= 10 && std::fabs(pt.y - (rr.top + 19)) <= 10) { SetSetting(L"destaque", k == 0 ? L"azul" : ACCENTS[k].first); Rebuild(); }
+            if (std::fabs(pt.x - x) <= 10 && std::fabs(pt.y - (rr.top + 19)) <= 10) { SetSetting(L"destaque", ACCENTS[k].first);  /* multicor fica multicor (issue #240); a cor é o azul */ Rebuild(); }
     };
     Row tema = TemaRow();
     // o Tema fica sempre livre: com "Reduzir transparência" o vidro só fica opaco (como no Mac)
@@ -1232,7 +1232,7 @@ Page AparenciaGolden() {
     color.clickAt = [](D2D1_POINT_2F pt, D2D1_RECT_F rr) {
         for (int k = 0; k < 10; k++) {
             float x = rr.right - 21.75f - (9 - k) * 36.f;
-            if (std::fabs(pt.x - x) <= 15 && std::fabs(pt.y - (rr.top + 21.25f)) <= 15) { SetSetting(L"destaque", k == 0 ? L"azul" : GG_KEYS[k]); Rebuild(); }
+            if (std::fabs(pt.x - x) <= 15 && std::fabs(pt.y - (rr.top + 21.25f)) <= 15) { SetSetting(L"destaque", GG_KEYS[k]);  /* multicor fica multicor (issue #240) */ Rebuild(); }
         }
     };
     Row hl = Popup(L"Cor do realce do texto", { L"Automática", L"Azul", L"Roxo", L"Rosa", L"Vermelho", L"Laranja", L"Amarelo", L"Verde", L"Grafite" },

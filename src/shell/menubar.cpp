@@ -119,17 +119,31 @@ std::wstring TrayKey(const TrayIcon& t) {  // nome estável: a dica até a prime
     while (!k.empty() && k.back() == L' ') k.pop_back();
     return k.empty() ? ProgramaDoIcone(t.hwnd) : k;
 }
+// A chave que se guarda desde o issue #237: "@programa" (mais "#{GUID}" quando o ícone tem GUID). Apps que trocam a dica
+// enquanto rodam (Vikey: "Vikey", "Vikey – Tiếng Việt", "Vikey – English") voltavam para a setinha a cada troca, porque a
+// chave era a dica. O uid fica de fora: alguns apps sorteiam um a cada vez que abrem (MSI Afterburner). As chaves antigas
+// (a dica) continuam valendo até o ícone ser fixado de novo.
+std::wstring TrayId(const TrayIcon& t) {
+    std::wstring p = ProgramaDoIcone(t.hwnd);
+    if (p.empty()) return L"";
+    static const GUID zero{};
+    if (memcmp(&t.guid, &zero, sizeof(GUID))) {
+        wchar_t g[64] = {};
+        if (StringFromGUID2(t.guid, g, 64)) return L"@" + p + L"#" + g;
+    }
+    return L"@" + p;
+}
 bool IsShown(const TrayIcon& t) {
     if (shell::Setting(L"barra_icones_todos", L"0") == L"1") return true;  // Central de Controle: "Sempre na barra de menus"
-    std::wstring k = TrayKey(t);
-    for (auto& s : Shown()) if (!_wcsicmp(s.c_str(), k.c_str())) return true;
+    std::wstring k = TrayKey(t), id = TrayId(t);
+    for (auto& s : Shown()) if (!_wcsicmp(s.c_str(), k.c_str()) || (!id.empty() && !_wcsicmp(s.c_str(), id.c_str()))) return true;
     return false;
 }
 void SetShown(const TrayIcon& t, bool on) {
     auto v = Shown();
-    std::wstring k = TrayKey(t);
-    v.erase(std::remove_if(v.begin(), v.end(), [&](const std::wstring& x) { return !_wcsicmp(x.c_str(), k.c_str()); }), v.end());
-    if (on) v.push_back(k);
+    std::wstring k = TrayKey(t), id = TrayId(t);
+    v.erase(std::remove_if(v.begin(), v.end(), [&](const std::wstring& x) { return !_wcsicmp(x.c_str(), k.c_str()) || (!id.empty() && !_wcsicmp(x.c_str(), id.c_str())); }), v.end());
+    if (on) v.push_back(id.empty() ? k : id);
     std::wstring out;
     for (auto& x : v) { if (!out.empty()) out += L"|"; out += x; }
     shell::SetSetting(L"barra_icones", out);
