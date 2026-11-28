@@ -1723,6 +1723,18 @@ void Tick() {
     if (g_fundo) want0 = false;
     HWND ex = ExplorerProgman();
     DWORD now = GetTickCount();
+    // PecoFence ancora as suas janelas à mesa do Explorador. Enquanto estiver ativo,
+    // deixe o Explorador gerir a mesa para que as cercas não fiquem encobertas.
+    static ULONGLONG pecoLastSeen;
+    static bool pecoCompat;
+    const ULONGLONG tick64 = GetTickCount64();
+    if (g_fundo && ex && FindWindowW(L"PecoFence.Control", nullptr)) pecoLastSeen = tick64;
+    const bool useExplorerForPeco = g_fundo && ex && pecoLastSeen && tick64 - pecoLastSeen <= 3000;
+    if (useExplorerForPeco != pecoCompat) {
+        pecoCompat = useExplorerForPeco;
+        Log(L"mesa: compatibilidade PecoFence %ls", pecoCompat ? L"ligada (mesa do Explorador)" : L"desligada");
+    }
+    if (pecoCompat) g_fundo = false;
     {   // Papel de parede trocado sem aviso: com o Explorador aberto, o Ajustes troca por ele (IDesktopWallpaper) e
         // ninguém manda o WM_SETTINGCHANGE para a nossa mesa (ela continuava com o antigo). Confere o registro.
         static std::wstring lastWall;

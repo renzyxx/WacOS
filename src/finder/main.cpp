@@ -7572,6 +7572,7 @@ static void Arrange(const Launch& L) {
     UINT dx = 96, dy = 96; GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dx, &dy);
     float sc = dx / 96.f;
     MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(mon, &mi);
+    RECT work = mi.rcWork;
     int w = (int)(1060 * sc), h = (int)(680 * sc);
     int x = (mi.rcWork.left + mi.rcWork.right - w) / 2, y = (mi.rcWork.top + mi.rcWork.bottom - h) / 2;
     if (g_pick.on) {
@@ -7593,6 +7594,7 @@ static void Arrange(const Launch& L) {
         HMONITOR sm = MonitorFromRect(&r, MONITOR_DEFAULTTONULL);
         MONITORINFO smi{ sizeof(smi) };
         if (sm && GetMonitorInfoW(sm, &smi) && IntersectRect(&inter, &r, &smi.rcWork)) {
+            work = smi.rcWork;
             x = r.left; y = r.top; w = r.right - r.left; h = r.bottom - r.top;
             int step = (int)(22 * sc);
             for (int tries = 0; tries < 10; tries++) {  // outra janela do Finder já está aí: desce 22 pt
@@ -7606,6 +7608,13 @@ static void Arrange(const Launch& L) {
                 x += step; y += step;
             }
         }
+    }
+    // A posição salva ou o deslocamento da cascata pode deixar a barra de título fora da área útil.
+    if (!g_pick.on && work.right > work.left && work.bottom > work.top) {
+        w = std::min<int>(w, work.right - work.left);
+        h = std::min<int>(h, work.bottom - work.top);
+        x = std::clamp<int>(x, work.left, work.right - w);
+        y = std::clamp<int>(y, work.top, work.bottom - h);
     }
     SetWindowPos(g_hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
 }

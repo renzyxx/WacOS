@@ -99,7 +99,7 @@ void GpuMotionAnim(GpuSurface& s, float cx, float cy, const std::vector<float>& 
 // Desliza o conteúdo (px) de (fromX, fromY) até (toX, toY) em `ms`, com ease-out, pelo próprio compositor.
 void GpuSlide(GpuSurface& s, float fromX, float fromY, float toX, float toY, float ms);
 // Quadros no ritmo do monitor: enquanto `on`, manda `msg` para `hwnd` a cada atualização da tela.
-void FrameClock(HWND hwnd, UINT msg, bool on);
+void FrameClock(HWND hwnd, UINT msg, bool on, unsigned targetFps = 0);
 void FrameAck(HWND hwnd, UINT msg);  // no começo do tratamento do quadro: o próximo só vem depois deste (sem fila)
 // Compositor (DirectComposition) do dispositivo de Gpu(): para animações que o DWM faz sozinho.
 IDCompositionDevice* Comp();
@@ -121,6 +121,7 @@ std::wstring IconStyle();
 std::wstring IconStyleKey();  // estilo + cor de destaque (para os caches: trocar a cor refaz os ícones Tingidos)
 D2D1_COLOR_F Accent();  // Ajustes > Aparência > Cor de destaque (destaque=), "multicor" = azul
 void StyleIcon(UINT w, UINT h, std::vector<BYTE>& bgra, const std::wstring& style);
+void StyleIcon(UINT w, UINT h, std::vector<BYTE>& bgra, const std::wstring& style, const std::wstring& accent, bool dark);
 
 // Pixels BGRA pré-multiplicados de um item do shell (exe, atalho, pasta, shell:AppsFolder\...).
 bool ShellImage(const std::wstring& parsingName, int px, UINT& w, UINT& h, std::vector<BYTE>& bgra, bool iconOnly);
@@ -589,6 +590,7 @@ bool Create(HINSTANCE hi);
 // issue #45: no Tahoe e no Golden Gate, o ícone fora do formato do Mac vai para dentro do quadrado arredondado cinza
 // (dock_icones_cinza, como o macOS 26). O Dock, o Launchpad e o Spotlight usam a mesma.
 void Cela(UINT w, UINT h, std::vector<BYTE>& px);
+void Cela(UINT w, UINT h, std::vector<BYTE>& px, bool dark);
 void Update();          // apps mudaram
 HWND Hwnd();
 HWND Fundo();  // o vidro, a janela mais de baixo do Dock
@@ -643,7 +645,8 @@ struct Piece {  // px, nas coordenadas da janela
 };
 // várias peças de vidro soltas numa janela só (módulos da Central): cada uma com a lente dela e a tinta;
 // o contorno fica por conta de quem desenha por cima
-void SetPieces(HWND h, float w, float hgt, const std::vector<Piece>& pieces, D2D1_COLOR_F tint, float minFrost = 0);  // minFrost: desfoque mínimo (DIP)
+void SetPieces(HWND h, float w, float hgt, const std::vector<Piece>& pieces, D2D1_COLOR_F tint, float minFrost = 0,
+               bool refreshUnchanged = true);  // minFrost: desfoque mínimo (DIP)
 bool Real();                           // vidro real ativo (senão, o fosco)
 void CaptureVisible(bool show);        // Captura de Tela do projeto: mostrar as peças só durante a foto
 const Style& Current();

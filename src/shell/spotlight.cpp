@@ -20,6 +20,7 @@
 #include <mutex>
 #include <thread>
 #include <winhttp.h>
+#include <wrl/client.h>
 #include "../comum/idioma.h"
 #include "../menu/context_menu.h"
 #include "../comum/vidro.h"
@@ -33,6 +34,7 @@ namespace {
 // melhor resultado num cartão (56), cabeçalhos (24), linhas (30) e as imagens em miniaturas (68).
 // W, FIELD_H, CARD_H e WIN_H mudam com o tema (Metricas(), a cada abertura): Sequoia 720 × 60; Tahoe 640 × 56
 float W = 720, FIELD_H = 60, CARD_H = 66;
+float g_layoutHeight = -1;
 const float RADIUS = 22, PAD = 12, ROW_H = 36, HEAD_H = 28, TILE = 86, TILE_GAP = 10, MAX_LIST_H = 470;
 // grade de apps (modo Aplicativos do Tahoe): antes 5 colunas de 112 com ícones de 64; o Apps do macOS 26 (guia,
 // seção 39, medido) é um painel de 764 de largura com 7 colunas de células de 112 × 92, ícones de 77 e nome de 18
@@ -50,6 +52,7 @@ const float GG_BAR_W = 520;
 // altura da tela; com resultados, cantos de 26
 extern int g_mode;
 void Metricas() {
+    g_layoutHeight = -1;
     bool t = liquid::On();
     W = t ? (g_mode == 1 ? 764.f : 640.f) : 720.f;  // Tahoe: o Apps (modo Aplicativos) é mais largo
     FIELD_H = t ? 56.f : 60.f;
@@ -230,6 +233,7 @@ float g_h = FIELD_H, g_selTop = -1, g_selBot = -1, g_scrollNow = 0;
 bool g_keyNav;          // macOS 27: o app escolhido só aparece realçado depois das setas (a grade abre sem realce)
 double g_panelInAt = -1e9;  // macOS 27: quando o painel de baixo apareceu (entra esmaecendo, sem crescer)
 double g_openAt, g_closeAt, g_lastFrame;  // ms de anim::Now (relógio de alta precisão)
+bool g_frameRunning, g_refreshAppsGlass;
 ui::GpuSurface g_s;
 IDWriteTextFormat *g_tfField, *g_tfRow, *g_tfHead, *g_tfTitle, *g_tfSub, *g_tfCell, *g_tfChip;
 std::wstring g_query;
@@ -248,9 +252,14 @@ float g_scroll = 0;
 std::atomic<int> g_gen{ 0 };     // geração da busca de arquivos (respostas antigas são ignoradas)
 
 // ícones: chave (app:parsing / arquivo:caminho / pagina) → pixels; bitmaps da GPU criados ao desenhar
-// small: ícone de baixa resolução (só 16/32/48 px no programa): vai num quadrado cinza, como o macOS 26 faz
-// com ícones fora do padrão; failed: o app não tem ícone (quadrado com a inicial)
-struct Icon { UINT w = 0, h = 0; std::vector<BYTE> px; ID2D1Bitmap* bmp = nullptr; bool loading = false, lowres = false, failed = false; };
+// lowres: ícone pequeno num quadrado cinza; failedAt: última falha, mostra a inicial do app
+struct Icon {
+    UINT w = 0, h = 0;
+    std::vector<BYTE> px;
+    ID2D1Bitmap* bmp = nullptr;
+    ULONGLONG failedAt = 0;
+    bool loading = false, lowres = false;
+};
 std::map<std::wstring, Icon> g_icons;
 std::mutex g_iconMu;
 
@@ -810,16 +819,36 @@ void SearchFiles(int gen, std::wstring q) {
     if (gen != g_gen || !PostMessageW(g_wnd, WM_SP_FILES, gen, (LPARAM)out)) delete out;
 }
 
-// ---- ícones (thread por pedido; poucos de cada vez)
-std::wstring IconKey(const Result& r) {
+// ---- ícones: as threads recebem uma cópia do estilo escolhido pela interface
+struct AppIconAppearance {
+    std::wstring style, accent;
+    bool dark = false, frame = false;
+};
+
+AppIconAppearance ReadAppIconAppearance() {
+    AppIconAppearance a;
+    a.style = ui::IconStyle();
+    if (a.style != L"padrao" && !a.style.empty()) {
+        a.accent = shell::Setting(L"destaque", L"azul");
+        a.dark = ui::Dark();
+    }
+    a.frame = liquid::On() && shell::Setting(L"dock_icones_cinza", L"1") == L"1";
+    return a;
+}
+
+std::wstring IconKey(const Result& r, const AppIconAppearance& a) {
     switch (r.kind) {
-    case K_APP: return L"app:" + ui::IconStyleKey() + L":" + r.target;  // estilo/cor de destaque na chave
+    case K_APP: return L"app:" + a.style + L"/" + a.accent + (a.dark ? L"/e" : L"/c") + (a.frame ? L"/1:" : L"/0:") + r.target;
     case K_SETTING: return EhWin(r.target) ? r.target : L"ajustes";  // os do Windows têm cada um o seu ícone
     case K_CALC: return L"calc";
     case K_WEB: return L"web";
     case K_AI: return L"siri";
     default: return L"file:" + r.target;
     }
+}
+
+std::wstring IconKey(const Result& r) {
+    return IconKey(r, r.kind == K_APP ? ReadAppIconAppearance() : AppIconAppearance{});
 }
 
 // Moldura do Windows em volta de um ícone pequeno ampliado: a borda (2 px) quase toda opaca e, logo para
@@ -841,12 +870,12 @@ bool Framed(UINT s, const std::vector<BYTE>& px) {
 // Ícones: uma fila e duas threads fixas (antes, uma thread nova por ícone: digitando, dezenas pediam ao
 // Windows ao mesmo tempo e o desenho do Spotlight brigava com elas pelo processador, quadros de 40-70 ms).
 // Os mais recentes primeiro: ao digitar, os resultados de antes já não importam.
-struct IconJob { Result r; std::wstring key; int px; };
+struct IconJob { Result r; std::wstring key; int px; AppIconAppearance appearance; };
 std::deque<IconJob> g_iconQ;
 std::condition_variable g_iconCv;
 int g_iconWorkers;
 
-void LoadIcon(const Result& copy, const std::wstring& key, int px);
+void LoadIcon(const IconJob& job);
 
 void IconWorker() {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -859,29 +888,36 @@ void IconWorker() {
             j = std::move(g_iconQ.back());
             g_iconQ.pop_back();
         }
-        LoadIcon(j.r, j.key, j.px);
+        LoadIcon(j);
     }
 }
 
-void RequestIcon(const Result& r, int px) {
-    std::wstring key = IconKey(r);
-    if (key == L"calc" || key == L"web") return;
-    {
-        std::lock_guard<std::mutex> l(g_iconMu);
-        auto& ic = g_icons[key];
-        if (ic.loading || !ic.px.empty() || ic.bmp) return;
-        ic.loading = true;
-        g_iconQ.push_back({ r, key, px });
-        while (g_iconQ.size() > 64) {  // pedidos velhos demais saem da fila (voltam a ser pedidos se aparecerem)
-            g_icons[g_iconQ.front().key].loading = false;
-            g_iconQ.pop_front();
-        }
-        while (g_iconWorkers < 2) { g_iconWorkers++; std::thread(IconWorker).detach(); }
+// Chamado com g_iconMu. Um ícone que falhou fica na cache antes de uma nova tentativa.
+void QueueIcon(const Result& r, const std::wstring& key, int px, const AppIconAppearance& a, Icon& ic) {
+    if (ic.loading || !ic.px.empty() || ic.bmp) return;
+    if (ic.failedAt && GetTickCount64() - ic.failedAt < 30000) return;
+    g_iconQ.push_back({ r, key, px, a });
+    ic.loading = true;
+    while (g_iconQ.size() > 64) {  // pedidos velhos demais saem da fila (voltam a ser pedidos se aparecerem)
+        g_icons[g_iconQ.front().key].loading = false;
+        g_iconQ.pop_front();
     }
+    while (g_iconWorkers < 2) { g_iconWorkers++; std::thread(IconWorker).detach(); }
     g_iconCv.notify_one();
 }
 
-void LoadIcon(const Result& copy, const std::wstring& key, int px) {
+void RequestIcon(const Result& r, int px) {
+    if (r.kind == K_CALC || r.kind == K_WEB || r.kind == K_AI) return;
+    AppIconAppearance a = r.kind == K_APP ? ReadAppIconAppearance() : AppIconAppearance{};
+    std::wstring key = IconKey(r, a);
+    std::lock_guard<std::mutex> l(g_iconMu);
+    QueueIcon(r, key, px, a, g_icons[key]);
+}
+
+void LoadIcon(const IconJob& job) {
+    const Result& copy = job.r;
+    const std::wstring& key = job.key;
+    int px = job.px;
     {
         Icon got;
         bool ok = false;
@@ -932,42 +968,47 @@ void LoadIcon(const Result& copy, const std::wstring& key, int px) {
         } else {
             ok = ui::ShellImage(copy.target, px, got.w, got.h, got.px, copy.kind != K_IMAGE);
         }
+        ok = ok && got.w && got.h && !got.px.empty();
+        if (ok && copy.kind == K_APP) {
+            const auto& a = job.appearance;
+            if (a.frame) dock::Cela(got.w, got.h, got.px, a.style == L"escuro");
+            ui::StyleIcon(got.w, got.h, got.px, a.style, a.accent, a.dark);
+        }
         {
             std::lock_guard<std::mutex> l(g_iconMu);
             auto& ic = g_icons[key];
             ic.loading = false;
+            ic.failedAt = ok ? 0 : GetTickCount64();
             if (ok) { ic.w = got.w; ic.h = got.h; ic.px = std::move(got.px); ic.lowres = got.lowres; }
-            else ic.failed = true;
         }
         if (g_wnd) PostMessageW(g_wnd, WM_SP_ICON, 0, 0);
     }
 }
 
-// 0 = normal (ou ainda carregando), 1 = pequeno, 2 = sem ícone
-int IconState(const Result& r) {
-    std::lock_guard<std::mutex> l(g_iconMu);
-    auto it = g_icons.find(IconKey(r));
-    if (it == g_icons.end()) return 0;
-    return it->second.failed ? 2 : it->second.lowres ? 1 : 0;
-}
-
 // no máximo 3 ícones novos sobem para a GPU por quadro (cada um de 256 px custa ~1 ms); os outros, no próximo
 int g_uploads;
-double g_uploadFrame;
-ID2D1Bitmap* IconFor(ID2D1RenderTarget* rt, const Result& r) {
+bool g_uploadPending;
+struct IconView { ID2D1Bitmap* bmp; bool lowres, missing; };
+
+IconView IconFor(ID2D1RenderTarget* rt, const Result& r, int px, const AppIconAppearance* frameAppearance) {
+    AppIconAppearance current;
+    if (r.kind == K_APP && !frameAppearance) current = ReadAppIconAppearance();
+    const auto& a = frameAppearance ? *frameAppearance : current;
+    std::wstring key = IconKey(r, a);
     std::lock_guard<std::mutex> l(g_iconMu);
-    auto it = g_icons.find(IconKey(r));
-    if (it == g_icons.end()) return nullptr;
-    auto& ic = it->second;
+    auto& ic = g_icons[key];
     if (!ic.bmp && !ic.px.empty()) {
-        double now = anim::Now();
-        if (now - g_uploadFrame > 8) { g_uploadFrame = now; g_uploads = 0; }
-        if (g_uploads >= 3) { if (g_wnd) PostMessageW(g_wnd, WM_SP_ICON, 0, 0); return nullptr; }  // pede outro quadro
+        if (g_uploads >= 3) {
+            if (!g_uploadPending && g_wnd) g_uploadPending = PostMessageW(g_wnd, WM_SP_ICON, 0, 0) != FALSE;
+            return {};
+        }
         g_uploads++;
-        if (r.kind == K_APP) { dock::Cela(ic.w, ic.h, ic.px); std::wstring st = ui::IconStyle(); if (st != L"padrao") ui::StyleIcon(ic.w, ic.h, ic.px, st); }  // issue #45: o quadrado cinza também  // Tahoe: Escuro/Transparente/Tingido também aqui
-        ic.bmp = ui::Bitmap(rt, ic.w, ic.h, ic.px); ic.px.clear(); ic.px.shrink_to_fit();
+        ic.bmp = ui::Bitmap(rt, ic.w, ic.h, ic.px);
+        std::vector<BYTE>().swap(ic.px);
+        if (!ic.bmp) ic.failedAt = GetTickCount64();
     }
-    return ic.bmp;
+    if (!ic.bmp) QueueIcon(r, key, px, a, ic);
+    return { ic.bmp, ic.bmp && ic.lowres, ic.failedAt != 0 };
 }
 
 // ---- resultados e linhas
@@ -1091,6 +1132,7 @@ void Place();
 D2D1_COLOR_F TintaGG();
 void ModeChanged() {
     g_listIn = anim::Now();
+    if (g_mode == 1) g_refreshAppsGlass = true;
     float w0 = W;
     Metricas();  // Tahoe: entrar/sair do Apps muda a largura do painel
     if (W != w0 && g_visible) { g_pill = W; Place(); }
@@ -1273,6 +1315,7 @@ void BuildMode() {
 }
 
 void Rebuild() {
+    g_layoutHeight = -1;
     g_res.clear();
     g_rows.clear();
     g_canMore.clear();
@@ -1394,8 +1437,8 @@ void Rebuild() {
 }
 
 // posições de tudo no conteúdo (a partir do topo da lista); devolve a altura total
-float Layout() {
-    if (liquid::Leopard()) {  // Leopard: uma lista só; o cabeçalho de cada seção vai na coluna da esquerda da 1ª linha
+float ComputeLayout(bool leopard, bool gg) {
+    if (leopard) {  // Leopard: uma lista só; o cabeçalho de cada seção vai na coluna da esquerda da 1ª linha
         float y = 4;
         bool first = true;
         for (auto& row : g_rows) {
@@ -1407,7 +1450,6 @@ float Layout() {
         }
         return y + 4;
     }
-    const bool gg = liquid::Golden();
     float y = gg ? (g_mode == 1 ? 17.5f : HasChips() ? 7.5f : 8.f) : 8, x = PAD;  // (a lista já começa 6 abaixo das fichas)
     bool inTiles = false;
     // macOS 27 (Apps.png): 7 colunas de 115 a 18,5 da borda, fileiras de 102, linha de 15 depois dos mais usados
@@ -1431,7 +1473,7 @@ float Layout() {
             continue;
         }
         if (inTiles) { y += TILE + TILE_GAP; inTiles = false; }
-        float h = row.type == R_MODE ? 47.f : row.type == R_HEAD ? HEAD_H : row.type == R_CARD ? CARD_H : liquid::Golden() ? CARD_H : ROW_H;
+        float h = row.type == R_MODE ? 47.f : row.type == R_HEAD ? HEAD_H : (row.type == R_CARD || gg) ? CARD_H : ROW_H;
         row.r = D2D1::RectF(PAD, y, W - PAD, y + h);
         y += h + (row.type == R_CARD ? 4 : 0);
     }
@@ -1440,7 +1482,16 @@ float Layout() {
     return y + 6;
 }
 
-float ListHeight() { return Layout(); }
+float ListHeight() {
+    static bool lastLeopard, lastGolden;
+    const bool leopard = liquid::Leopard(), golden = liquid::Golden();
+    if (g_layoutHeight < 0 || leopard != lastLeopard || golden != lastGolden) {
+        g_layoutHeight = ComputeLayout(leopard, golden);
+        lastLeopard = leopard;
+        lastGolden = golden;
+    }
+    return g_layoutHeight;
+}
 
 float PanelH() { return g_rows.empty() && !HasChips() ? FIELD_H : ListTop() + std::min(MAX_LIST_H - (ListTop() - FIELD_H - 1), ListHeight()); }
 
@@ -1466,6 +1517,29 @@ void Text(ID2D1RenderTarget* rt, const std::wstring& s, IDWriteTextFormat* tf, D
     rt->DrawTextW(s.c_str(), (UINT32)s.size(), tf, r, br, D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 
+void AppLabel(ID2D1DeviceContext* dc, const std::wstring& name, IDWriteTextFormat* tf, D2D1_RECT_F box,
+              ID2D1SolidColorBrush* br, D2D1_COLOR_F color) {
+    if (!tf) return;
+    static std::map<std::wstring, Microsoft::WRL::ComPtr<IDWriteTextLayout>> layouts;
+    static IDWriteTextFormat* lastFormat;
+    static float lastWidth;
+    const float width = box.right - box.left;
+    if (tf != lastFormat || std::fabs(width - lastWidth) > 0.01f) {
+        layouts.clear();
+        lastFormat = tf;
+        lastWidth = width;
+    }
+    auto it = layouts.find(name);
+    if (it == layouts.end()) {
+        if (layouts.size() >= 512) layouts.clear();
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        if (FAILED(ui::dw->CreateTextLayout(name.c_str(), (UINT32)name.size(), tf, width, 18.f, layout.GetAddressOf()))) return;
+        it = layouts.emplace(name, std::move(layout)).first;
+    }
+    br->SetColor(color);
+    dc->DrawTextLayout({ box.left, box.top }, it->second.Get(), br, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+}
+
 // nome com o trecho digitado em negrito ("zoom preços"), como no Mac
 void NameText(ID2D1RenderTarget* rt, const std::wstring& s, IDWriteTextFormat* tf, D2D1_RECT_F r, ID2D1SolidColorBrush* br, D2D1_COLOR_F c) {
     IDWriteTextLayout* lay = nullptr;
@@ -1479,7 +1553,8 @@ void NameText(ID2D1RenderTarget* rt, const std::wstring& s, IDWriteTextFormat* t
     lay->Release();
 }
 
-void DrawIcon(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Result& r, D2D1_RECT_F box, const Pal& p) {
+void DrawIcon(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Result& r, D2D1_RECT_F box, const Pal& p,
+              int px = 64, const AppIconAppearance* frameAppearance = nullptr) {
     if (r.kind == K_AI) {  // a Siri: o símbolo do Apple Intelligence em roxo
         br->SetColor(D2D1::ColorF(0.62f, 0.38f, 1.f));
         float k = (box.right - box.left) * 0.12f;
@@ -1494,8 +1569,14 @@ void DrawIcon(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Result& r,
             dc->DrawEllipse(D2D1::Ellipse({ (in.left + in.right) / 2, (in.top + in.bottom) / 2 }, (in.right - in.left) / 2, (in.bottom - in.top) / 2), br);
         return;
     }
-    int st = r.kind == K_APP ? IconState(r) : 0;
-    if (st) {  // Tahoe: ícone fora do padrão (ou nenhum) num quadrado arredondado cinza
+    auto icon = IconFor(dc, r, px, frameAppearance);
+    if (r.kind == K_APP && !icon.bmp && !icon.missing) {
+        const float side = box.right - box.left;
+        br->SetColor(p.sep);
+        dc->FillRoundedRectangle(D2D1::RoundedRect(box, side * 0.225f, side * 0.225f), br);
+        return;
+    }
+    if (r.kind == K_APP && (icon.lowres || icon.missing)) {  // Tahoe: ícone fora do padrão (ou nenhum) num quadrado arredondado cinza
         float S = box.right - box.left, rad = S * 0.225f;
         D2D1_RECT_F q = D2D1::RectF(box.left + S * 0.04f, box.top + S * 0.04f, box.right - S * 0.04f, box.bottom - S * 0.04f);
         ID2D1GradientStopCollection* sc = nullptr;
@@ -1511,7 +1592,7 @@ void DrawIcon(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Result& r,
         br->SetColor(D2D1::ColorF(0, 0, 0, 0.10f));
         dc->DrawRoundedRectangle(D2D1::RoundedRect(q, rad, rad), br, std::max(0.5f, S / 96));
         float cx = (q.left + q.right) / 2, cy = (q.top + q.bottom) / 2;
-        if (ID2D1Bitmap* b = st == 1 ? IconFor(dc, r) : nullptr) {
+        if (ID2D1Bitmap* b = icon.bmp) {
             D2D1_SIZE_F bs = b->GetSize();
             float k = S * 0.58f / std::max(bs.width, bs.height);
             float dw = bs.width * k, dh = bs.height * k;
@@ -1531,7 +1612,7 @@ void DrawIcon(ID2D1DeviceContext* dc, ID2D1SolidColorBrush* br, const Result& r,
         }
         return;
     }
-    if (ID2D1Bitmap* b = IconFor(dc, r)) {
+    if (ID2D1Bitmap* b = icon.bmp) {
         if (r.kind == K_IMAGE) {  // miniatura: preenche o quadrado, cortando o que sobra
             D2D1_SIZE_F s = b->GetSize();
             float bw = box.right - box.left, bh = box.bottom - box.top, k = std::max(bw / s.width, bh / s.height);
@@ -1734,6 +1815,9 @@ void PaintLeopard() {
 
 void Paint() {
     if (!g_visible) return;
+    g_uploads = 0;
+    g_uploadPending = false;
+    ListHeight();
     if (liquid::Leopard()) { PaintLeopard(); return; }
     double tp0 = anim::Now();
     float sc = Sc();
@@ -1919,7 +2003,7 @@ void Paint() {
         else if (liquid::On()) dc->FillRectangle(D2D1::RectF(20, FIELD_H, W - 20, FIELD_H + 1), br);  // Tahoe: divisa solta das bordas
         else dc->FillRectangle(D2D1::RectF(0, FIELD_H, W, FIELD_H + 1), br);
         float listTop = ListTop();
-        Layout();
+        const auto appAppearance = ReadAppIconAppearance();
         // conteúdo novo (trocou de modo): entra esmaecendo e subindo 10 pt, como no Mac
         float lin = anim::Ease(std::clamp((float)((anim::Now() - g_listIn) / 240.0), 0.f, 1.f));
         // macOS 27: o painel entra só esmaecendo (~140 ms), sem subir
@@ -2017,8 +2101,7 @@ void Paint() {
                     float ang = 2.0f * std::sin(tt * 6.2832f * 3.4f + i * 1.7f);
                     dc->SetTransform(D2D1::Matrix3x2F::Rotation(ang, { cx, (ir.top + ir.bottom) / 2 }) * base);
                 }
-                if (!IconFor(dc, res)) RequestIcon(res, 96);
-                DrawIcon(dc, br, res, ir, p);
+                DrawIcon(dc, br, res, ir, p, 96, &appAppearance);
                 if (edit) {  // o × no canto de cima à esquerda
                     D2D1_POINT_2F xc{ ir.left + 7, ir.top + 7 };
                     br->SetColor(D2D1::ColorF(0.30f, 0.30f, 0.32f, 0.95f));
@@ -2041,12 +2124,12 @@ void Paint() {
                         tfCellGG->SetTrimming(&tr, dots);
                         if (dots) dots->Release();
                     }
-                    Text(dc, res.name, gg && tfCellGG ? tfCellGG : g_tfCell, D2D1::RectF(r.left + 2, r.top + nt, r.right - 2, r.top + nt + 18), br, p.text);
+                    AppLabel(dc, res.name, gg && tfCellGG ? tfCellGG : g_tfCell,
+                             D2D1::RectF(r.left + 2, r.top + nt, r.right - 2, r.top + nt + 18), br, p.text);
                 }
                 if (edit) dc->SetTransform(base);
                 continue;
             }
-            if (row.type == R_ROW && !IconFor(dc, res)) RequestIcon(res, 64);
             if (row.type == R_TILE) {
                 ID2D1RoundedRectangleGeometry* clip = nullptr;
                 ID2D1Factory* fac = nullptr;
@@ -2057,7 +2140,7 @@ void Paint() {
                 if (clip && layer) dc->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), clip), layer);
                 br->SetColor(p.card);
                 dc->FillRectangle(r, br);
-                DrawIcon(dc, br, res, r, p);
+                DrawIcon(dc, br, res, r, p, 160);
                 if (clip && layer) dc->PopLayer();
                 if (layer) layer->Release();
                 if (clip) clip->Release();
@@ -2107,7 +2190,7 @@ void Paint() {
         }
         if (g_dragging && g_press >= 0 && g_press < (int)g_rows.size() && g_rows[g_press].res >= 0) {  // o app arrastado, no ponteiro
             float k = APP_ICON * 1.12f;
-            DrawIcon(dc, br, g_res[g_rows[g_press].res], D2D1::RectF(g_dragPt.x - k / 2, g_dragPt.y - k / 2, g_dragPt.x + k / 2, g_dragPt.y + k / 2), p);
+            DrawIcon(dc, br, g_res[g_rows[g_press].res], D2D1::RectF(g_dragPt.x - k / 2, g_dragPt.y - k / 2, g_dragPt.x + k / 2, g_dragPt.y + k / 2), p, 96, &appAppearance);
         }
         if (edgeMask) { dc->PopLayer(); edgeMask->Release(); }
         dc->PopAxisAlignedClip();
@@ -2124,6 +2207,8 @@ void Paint() {
     struct TimeLog { double t0, &t1; ~TimeLog() { double t2 = anim::Now(); static int n; if (t2 - t0 > 10 && n++ < 60) Log(L"spotlight: quadro lento %.1f ms (desenho %.1f, vidro %.1f)", t2 - t0, t1 - t0, t2 - t1); } } tlog{ tp0, tp1 };
     // o vidro acompanha: mesma altura, opacidade e escala
     if (g_glass) {
+        const bool refreshGlass = g_mode != 1 || g_refreshAppsGlass;
+        g_refreshAppsGlass = false;
         // Tahoe: Spotlight é vidro leitoso (branco ~80% no claro), como a cápsula das capturas do macOS 26
         // Tahoe (vídeo do macOS 26): vidro claro e leitoso que pega a cor do fundo (a cápsula fica azulada sobre o azul)
         // Tahoe: medido na tela (guia, seções 52 e 60): escuro 0,19 × fundo + 0,12 (81 % de 0,148); claro 0,26 × fundo
@@ -2155,10 +2240,10 @@ void Paint() {
             const float fpw2 = std::min(W, GG_BAR_W), fx2 = (W - fpw2) / 2;
             std::vector<backdrop::Piece> pcs{ { D2D1::RectF(fx2 * sc, 0, (fx2 + fpw2) * sc, FIELD_H * sc), FIELD_H / 2 * sc } };
             if (H > FIELD_H + 1.5f) pcs.push_back({ D2D1::RectF(0, (FIELD_H + GG_GAP) * sc, W * sc, H * sc), 30 * sc });
-            backdrop::SetPieces(g_back, W * sc, H * sc, pcs, tint, 10.f);  // o desfoque segue o controle (mínimo igual ao do Tahoe)
+            backdrop::SetPieces(g_back, W * sc, H * sc, pcs, tint, 10.f, refreshGlass);
         } else if (liquid::On() && backdrop::Real()) {  // Tahoe: vidro claro atrás do texto, como o Spotlight do macOS 26
             std::vector<backdrop::Piece> pcs{ { D2D1::RectF(0, 0, pw * sc, H * sc), SpotR(H) * sc } };
-            backdrop::SetPieces(g_back, W * sc, H * sc, pcs, tint, 10.f);
+            backdrop::SetPieces(g_back, W * sc, H * sc, pcs, tint, 10.f, refreshGlass);
         } else backdrop::Set(g_back, pw * sc, H * sc, SpotR(H) * sc, tint);
 
 
@@ -2242,7 +2327,7 @@ bool Step() {
     };
     bool moving = false;
     if (liquid::On()) moving |= g_spLuz.Passo(g_spHover.y >= 0 && g_spHover.y < FIELD_H ? g_spHover.x : -1, g_spHover.y >= 0 && g_spHover.y < FIELD_H ? g_spHover.y : -1, dt);
-    Layout();
+    const float targetH = PanelH();
     if (g_edit || !g_cellAt.empty()) {  // Apps tremendo: cada célula desliza até o lugar novo
         for (auto& row : g_rows) {
             if (row.type != R_APP || row.res < 0) continue;
@@ -2261,7 +2346,6 @@ bool Step() {
         moving |= ease(g_pill, tw, 0.055f);
         moving |= now - g_listIn < 260;  // conteúdo entrando
     }
-    float targetH = PanelH();
     float listH = std::max(0.f, targetH - ListTop());
     if (liquid::Golden()) {
         // macOS 27 (vídeo, 5:58,8–5:58,9, quadro a quadro): o painel não cresce; aparece já do tamanho final, esmaecido e
@@ -2314,8 +2398,12 @@ void Transition(float& fade, float& scale) {
 }
 
 void Animate() {  // liga o relógio de quadros até tudo parar
-    g_lastFrame = anim::Now();
-    ui::FrameClock(g_wnd, WM_SP_FRAME, true);
+    if (!g_frameRunning) {
+        g_lastFrame = anim::Now();
+        g_frameRunning = true;
+        KillTimer(g_wnd, T_ICONS);
+    }
+    ui::FrameClock(g_wnd, WM_SP_FRAME, true, g_mode == 1 ? 60u : 0u);
 }
 
 void Refresh() {
@@ -2599,11 +2687,11 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(h, &ps); EndPaint(h, &ps); Paint(); return 0; }
     case WM_SP_APPS: if (g_open && (!g_query.empty() || ModePanel())) Refresh(); return 0;
     case WM_SP_ICON:  // ícones chegam aos montes (a grade de apps): um redesenho só para vários
-        SetTimer(h, T_ICONS, 24, nullptr);
+        if (g_visible && !g_frameRunning) SetTimer(h, T_ICONS, 24, nullptr);
         return 0;
     case WM_SP_FRAME:
         ui::FrameAck(h, WM_SP_FRAME);  // sem fila de quadros: o que se digita não espera atrás deles
-        if (!Step()) ui::FrameClock(h, WM_SP_FRAME, false);
+        if (!Step()) { g_frameRunning = false; ui::FrameClock(h, WM_SP_FRAME, false); }
         Paint();
         return 0;
     case WM_SP_FILES: {
@@ -2664,7 +2752,7 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         } else if (w == T_CARET) { g_caretOn = !g_caretOn; Paint(); }
         else if (w == T_VOZ) { if (!voz::Ouvindo()) KillTimer(h, T_VOZ); Paint(); }  // o microfone pulsando
         else if (w == T_REGRAB) { KillTimer(h, T_REGRAB); if (g_open) Grab(h); }
-        else if (w == T_ICONS) { KillTimer(h, T_ICONS); Paint(); }
+        else if (w == T_ICONS) { KillTimer(h, T_ICONS); if (!g_frameRunning) Paint(); }
         else if (w == T_HOLD) {  // segurou um app: a grade treme (como no Launchpad)
             KillTimer(h, T_HOLD);
             if (g_press >= 0 && !g_edit && CanArrange()) StartEdit();
@@ -2894,6 +2982,7 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
             Row moved = g_rows[g_press];
             g_rows.erase(g_rows.begin() + g_press);
             g_rows.insert(g_rows.begin() + t, moved);
+            g_layoutHeight = -1;
             g_press = t;
         }
         Animate();
@@ -2965,8 +3054,8 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_CONTEXTMENU: return 0;
     case WM_MOUSEWHEEL: {
         float listH = PanelH() - ListTop();
-        g_scroll = std::clamp(g_scroll - GET_WHEEL_DELTA_WPARAM(w) / 120.f * ROW_H * 2, 0.f, std::max(0.f, ListHeight() - listH));
-        Animate();
+        const float dest = std::clamp(g_scroll - GET_WHEEL_DELTA_WPARAM(w) / 120.f * ROW_H * 2, 0.f, std::max(0.f, ListHeight() - listH));
+        if (dest != g_scroll) { g_scroll = dest; Animate(); }
         return 0;
     }
     case WM_SP_FORA:  // clique no papel de parede: nem sempre tira o foco (mesa do Explorador por baixo), e o Spotlight ficava aberto
@@ -3083,6 +3172,7 @@ void spotlight::OpenMode(int mode) {
 }
 
 static void OpenWith(int mode) {
+    const double openingAt = anim::Now();
     g_open = true;
     menubar::SoundChanged(false);  // o ícone da barra ganha a cápsula do Tahoe
     if (g_appsAt && GetTickCount64() - g_appsAt > 5 * 60 * 1000) ScanApps();  // por garantia: o vigia (instalados.cpp) já avisa na hora
@@ -3103,7 +3193,7 @@ static void OpenWith(int mode) {
     g_selAll = !g_query.empty();  // como no Mac: reabre com a última busca, toda selecionada
     Rebuild();
     if (!wasVisible) { g_pill = W; g_reveal = false; g_revealAt = -1e9; }  // nasce como a cápsula comprida (Tahoe), sem os círculos
-    if (mode >= 1 && ModePanel()) { Layout(); g_h = PanelH(); g_scrollNow = 0; g_pill = W; ModeChanged(); }  // painel de modo (Apps): já nasce do tamanho final
+    if (mode >= 1 && ModePanel()) { ModeChanged(); g_h = PanelH(); g_scrollNow = 0; g_pill = W; }  // painel de modo (Apps): já nasce do tamanho final
     if (!g_query.empty() && Fold(g_query).size() >= 2) { ++g_gen; SetTimer(g_wnd, T_SEARCH, 10, nullptr); }
     Place();
     Animate();
@@ -3118,4 +3208,5 @@ static void OpenWith(int mode) {
     Grab(g_wnd);
     g_caretOn = true;
     SetTimer(g_wnd, T_CARET, 530, nullptr);
+    if (g_mode == 1) Log(L"spotlight: Apps abriu em %.1f ms (%zu itens)", anim::Now() - openingAt, g_rows.size());
 }

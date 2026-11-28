@@ -1540,6 +1540,16 @@ void MoveAnimated(Info* in, RECT z) {
     }
 }
 
+void MoveZoom(Info* in, const RECT& target) {
+    if (!in->custom) {
+        MoveAnimated(in, target);
+        return;
+    }
+    // Apps com barra própria podem não redesenhar enquanto a janela está oculta.
+    SetWindowPos(in->owner, nullptr, target.left, target.top, target.right - target.left, target.bottom - target.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 void ToggleZoom(Info* in) {
     HWND h = in->owner;
     if (in->zoomed) {
@@ -1550,7 +1560,7 @@ void ToggleZoom(Info* in) {
         MONITORINFO mi{ sizeof(mi) };
         if (GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi) && in->before.top < mi.rcWork.top)
             OffsetRect(&in->before, 0, mi.rcWork.top - in->before.top);
-        MoveAnimated(in, in->before);
+        MoveZoom(in, in->before);
         return;
     }
     // Barra própria (Claude, apps Electron) maximizada: logo depois do SW_RESTORE o DWM ainda devolve a moldura da
@@ -1575,7 +1585,7 @@ void ToggleZoom(Info* in) {
     }
     in->zoomed = true;
     SetPropW(h, L"MacJanelaAmpliada", (HANDLE)1);  // o Shell sabe que Win+↓ deve desfazer
-    MoveAnimated(in, z);
+    MoveZoom(in, z);
 }
 
 void SampleCaption(Info* in);
@@ -1789,7 +1799,10 @@ LRESULT CALLBACK OverlayProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 DWORD agora = GetMessageTime();
                 bool duplo = agora - ultimo <= GetDoubleClickTime() && std::abs(sp.x - onde.x) <= GetSystemMetrics(SM_CXDOUBLECLK) && std::abs(sp.y - onde.y) <= GetSystemMetrics(SM_CYDOUBLECLK);
                 ultimo = duplo ? 0 : agora; onde = sp;
-                if (duplo) { if (in->style & WS_MAXIMIZEBOX) ShowWindow(in->owner, IsZoomed(in->owner) ? SW_RESTORE : SW_MAXIMIZE); return 0; }
+                if (duplo) {
+                    if (in->style & WS_MAXIMIZEBOX) ToggleZoom(in);
+                    return 0;
+                }
                 // Nada de WM_NCLBUTTONDOWN no ponto do clique: o Chromium (Chrome, Discord e outros Electron) testa o ponto
                 // de novo e, por baixo da faixa da direita, estão os botões dele: o clique minimizava, ampliava ou fechava a
                 // janela (22/11/2026). Só arrasta se o ponteiro andar; um clique parado aqui não faz nada, como no Mac.
@@ -2711,7 +2724,7 @@ LRESULT CALLBACK OwnerProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR, DWORD_P
         return r;
     }
     case WM_NCLBUTTONDBLCLK:  // sem o botão de maximizar do Windows: o duplo clique na barra continua maximizando
-        if (w == HTCAPTION && (in->style & WS_MAXIMIZEBOX) && !in->custom) { ToggleZoom(in); return 0; }  // (barra própria: o app maximiza; vira ampliar)
+        if (w == HTCAPTION && (in->style & WS_MAXIMIZEBOX)) { ToggleZoom(in); return 0; }
         break;
     case WM_NCRBUTTONUP:  // o menu do sistema (sem WS_SYSMENU) não abre mais no clique direito da barra
         break;

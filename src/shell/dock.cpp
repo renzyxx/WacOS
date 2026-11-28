@@ -650,8 +650,11 @@ bool IsTileShaped(UINT w, UINT h, const std::vector<BYTE>& px) {
 std::vector<BYTE> Jail(UINT w, UINT h, const std::vector<BYTE>& src, bool dark);
 }  // namespace
 void dock::Cela(UINT w, UINT h, std::vector<BYTE>& px) {
-    if (!TAHOE_DOCK || shell::Setting(L"dock_icones_cinza", L"1") != L"1" || IsTileShaped(w, h, px)) return;
-    px = Jail(w, h, px, ui::IconStyle() == L"escuro");
+    if (!TAHOE_DOCK || shell::Setting(L"dock_icones_cinza", L"1") != L"1") return;
+    Cela(w, h, px, ui::IconStyle() == L"escuro");
+}
+void dock::Cela(UINT w, UINT h, std::vector<BYTE>& px, bool dark) {
+    if (!IsTileShaped(w, h, px)) px = Jail(w, h, px, dark);
 }
 namespace {
 // Tahoe: ícone fora do formato vai para dentro de um quadrado arredondado cinza (como o macOS 26 faz com os apps
@@ -1710,6 +1713,15 @@ void LeftClick(int i) {
     }
     if (it.kind == I_APP) {
         App& a = apps::list[it.app];
+        // O ícone também agrupa o Explorador, mas ele não substitui uma janela do Finder ao clicar.
+        if (a.finder && std::none_of(a.wins.begin(), a.wins.end(), [](const AppWin& win) {
+                wchar_t cls[32]{};
+                return GetClassNameW(win.hwnd, cls, _countof(cls)) && !wcscmp(cls, L"ArquivosJanela");
+            })) {
+            OpenFinder(L"");
+            ui::FrameClock(g_icons, WM_DOCKFRAME, true);
+            return;
+        }
         // o app já está na frente: o clique oculta (as janelas somem e voltam no próximo clique)
         HWND fg = GetForegroundWindow();
         HWND fgDono = fg ? GetAncestor(fg, GA_ROOTOWNER) : nullptr;  // diálogo ou janela de ferramenta do app: vale a dona

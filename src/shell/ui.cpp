@@ -394,7 +394,15 @@ namespace {
 // sistema está ocupado.
 // pending/acks: a janela que chama ui::FrameAck recebe o próximo quadro só depois de tratar o anterior (com o
 // desenho mais lento que a tela, as mensagens se acumulavam na fila e o que a pessoa digitava esperava atrás delas)
-struct Clock { HWND hwnd; UINT msg; std::atomic<bool> on; HANDLE wake; std::atomic<bool> pending{ false }, acks{ false }; DWORD postedAt = 0; };
+struct Clock {
+    HWND hwnd;
+    UINT msg;
+    std::atomic<bool> on;
+    HANDLE wake;
+    std::atomic<unsigned> targetFps{ 0 };
+    std::atomic<bool> pending{ false }, acks{ false };
+    DWORD postedAt = 0;
+};
 std::vector<Clock*> g_clocks;
 }
 
@@ -581,15 +589,18 @@ static void GlassIcon(UINT w, UINT h, std::vector<BYTE>& px, bool tinted, float 
 // Escuro: o fundo claro do ícone vira grafite e o desenho colorido fica (um pouco mais vivo);
 // Transparente e Tingido: o ícone vira vidro (GlassIcon).
 void ui::StyleIcon(UINT w, UINT h, std::vector<BYTE>& px, const std::wstring& style) {
+    if (style.empty() || style == L"padrao") return;
+    StyleIcon(w, h, px, style, shell::Setting(L"destaque", L"azul"), ui::Dark());
+}
+
+void ui::StyleIcon(UINT w, UINT h, std::vector<BYTE>& px, const std::wstring& style, const std::wstring& accent, bool dark) {
     if (style == L"padrao" || style.empty() || px.size() < (size_t)w * h * 4) return;
     float tr = 0.04f, tg = 0.52f, tb = 1.0f;  // azul do Mac
     {
         static const std::pair<const wchar_t*, UINT32> acc[] = { { L"roxo", 0x953D96 }, { L"rosa", 0xF74F9E }, { L"vermelho", 0xE0383E },
             { L"laranja", 0xF7821B }, { L"amarelo", 0xFCB827 }, { L"verde", 0x62BA46 }, { L"grafite", 0x8C8C8C }, { L"lavanda", 0x98A8D9 } };  // lavanda: a 10ª cor do macOS 27
-        std::wstring d = shell::Setting(L"destaque", L"azul");
-        for (auto& [n, c] : acc) if (d == n) { tr = ((c >> 16) & 255) / 255.f; tg = ((c >> 8) & 255) / 255.f; tb = (c & 255) / 255.f; }
+        for (auto& [n, c] : acc) if (accent == n) { tr = ((c >> 16) & 255) / 255.f; tg = ((c >> 8) & 255) / 255.f; tb = (c & 255) / 255.f; }
     }
-    bool dark = ui::Dark();
     if (style == L"transparente" || style == L"tingido") { GlassIcon(w, h, px, style == L"tingido", tr, tg, tb, dark); return; }
     // Escuro: só ícone de fundo claro tem o fundo trocado (o "Live" do Ableton já é escuro, com letra branca).
     // O fundo é o que aparece perto da borda do desenho: média da claridade numa faixa a ~12% da borda.
@@ -655,15 +666,17 @@ static LRESULT CALLBACK QuadroSaiu(int code, WPARAM w, LPARAM l) {
     return CallNextHookEx(nullptr, code, w, l);
 }
 
-void ui::FrameClock(HWND hwnd, UINT msg, bool on) {
+void ui::FrameClock(HWND hwnd, UINT msg, bool on, unsigned targetFps) {
     for (auto* c : g_clocks)
         if (c->hwnd == hwnd && c->msg == msg) {
+            if (on) c->targetFps = targetFps;
             if (on && !c->on) { c->on = true; SetEvent(c->wake); }
             else if (!on) c->on = false;
             return;
         }
     if (!on) return;
     auto* c = new Clock{ hwnd, msg, true, CreateEventW(nullptr, FALSE, FALSE, nullptr) };
+    c->targetFps = targetFps;
     {
         static thread_local HHOOK gancho;
         DWORD me = GetCurrentThreadId();
@@ -678,21 +691,31 @@ void ui::FrameClock(HWND hwnd, UINT msg, bool on) {
         DWORD since = GetTickCount(); unsigned frames = 0;
         // modo leve (leve.cpp): numa tela de 120/144/165 Hz, um quadro a cada `passo` da tela (~60 por segundo). As
         // animações andam por tempo real: só ficam com menos quadros, e a GPU integrada desenha metade ou um terço
-        unsigned vsync = 0, passo = 1;
-        auto medePasso = [&passo] {
+        unsigned vsync = 0, passo = 1, ultimoAlvo = 0;
+        auto medePasso = [&passo](unsigned alvo) {
             DWM_TIMING_INFO ti{ sizeof(ti) };
             passo = 1;
-            if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti)) && ti.rateRefresh.uiDenominator) {
+            if (alvo && SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti)) && ti.rateRefresh.uiDenominator) {
                 double hz = (double)ti.rateRefresh.uiNumerator / ti.rateRefresh.uiDenominator;
-                if (hz > 75) passo = (unsigned)std::lround(hz / 60.0);
+                passo = std::max(1u, (unsigned)std::lround(hz / alvo));
             }
         };
-        if (leve::Ativo()) medePasso();
         for (;;) {
-            if (!c->on) { WaitForSingleObject(c->wake, INFINITE); since = GetTickCount(); frames = 0; vsync = 0; if (leve::Ativo()) medePasso(); else passo = 1; continue; }
+            if (!c->on) {
+                WaitForSingleObject(c->wake, INFINITE);
+                since = GetTickCount(); frames = 0; vsync = 0; passo = 1; ultimoAlvo = 0;
+                continue;
+            }
+            unsigned alvo = c->targetFps.load();
+            if (leve::Ativo()) alvo = alvo ? std::min(alvo, 60u) : 60u;
+            if (alvo != ultimoAlvo) {
+                medePasso(alvo);
+                ultimoAlvo = alvo;
+                vsync = 0;
+            }
             DwmFlush();
             if (!c->on) continue;
-            if (passo > 1 && (vsync++ % passo) != 0) continue;  // modo leve: pula este quadro da tela
+            if (passo > 1 && (vsync++ % passo) != 0) continue;
             // janela destruída não precisa de quadros: desliga sozinho (janela escondida pode precisar: os
             // widgets animam pela janela invisível do relógio deles)
             if (!IsWindow(c->hwnd)) { c->on = false; continue; }

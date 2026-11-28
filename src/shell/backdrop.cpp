@@ -1921,11 +1921,13 @@ void backdrop::CaptureVisible(bool show) {
     DwmFlush();
 }
 
-void backdrop::SetPieces(HWND h, float w, float hgt, const std::vector<Piece>& pieces, D2D1_COLOR_F tint, float minFrost) {
+void backdrop::SetPieces(HWND h, float w, float hgt, const std::vector<Piece>& pieces, D2D1_COLOR_F tint, float minFrost,
+                         bool refreshUnchanged) {
     auto it = g_entries.find(h);
     if (it == g_entries.end()) return;
     auto& e = it->second;
-    bool same = e.hasSet && e.w == w && e.h == hgt && e.pieces.size() == pieces.size() && !memcmp(&e.pieceTint, &tint, sizeof(tint)) &&
+    bool same = e.hasSet && e.w == w && e.h == hgt && e.pieceFrost == minFrost &&
+                e.pieces.size() == pieces.size() && !memcmp(&e.pieceTint, &tint, sizeof(tint)) &&
                 std::equal(pieces.begin(), pieces.end(), e.pieces.begin(), [](const Piece& a, const Piece& b) {
                     return !memcmp(&a.r, &b.r, sizeof(a.r)) && a.radius == b.radius && a.goo == b.goo && !memcmp(&a.cap, &b.cap, sizeof(a.cap)) &&
                            a.capR == b.capR && a.broken == b.broken && a.circ.size() == b.circ.size() &&
@@ -1934,7 +1936,7 @@ void backdrop::SetPieces(HWND h, float w, float hgt, const std::vector<Piece>& p
     if (same) {
         // vidro real: redesenha sempre com o fundo atual. Antes só se a janela tivesse andado, e o seletor do
         // Alt+Tab, que reabre no mesmo lugar, aparecia com o fundo da última vez (a janela antiga atrás)
-        if (e.real) try { rg::Redraw(e); } catch (...) {}
+        if (e.real && refreshUnchanged) try { rg::Redraw(e); } catch (...) {}
         return;
     }
     e.w = w; e.h = hgt; e.radius = 0; e.tintIn = D2D1::ColorF(0, 0, 0, 0); e.hasSet = true;
