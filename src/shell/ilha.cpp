@@ -1713,6 +1713,7 @@ void SetRegion() {
     if (EqualRect(&r, &g_rgn)) return;
     g_rgn = r;
     SetWindowRgn(g_wnd, CreateRectRgn(r.left, r.top, r.right, r.bottom), FALSE);
+    if (g_back) SetWindowRgn(g_back, CreateRectRgn(r.left, r.top, r.right, r.bottom), FALSE);
 }
 
 void Paint() {
@@ -2310,8 +2311,9 @@ bool ilha::Create(HINSTANCE hi) {
     {
         WNDCLASSW bc{}; bc.lpfnWndProc = BackProc; bc.hInstance = hi; bc.lpszClassName = L"ShellIlhaFundo";
         RegisterClassW(&bc);
-        g_back = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
+        g_back = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_NOREDIRECTIONBITMAP,
                                  bc.lpszClassName, L"", WS_POPUP, 0, 0, 10, 10, nullptr, nullptr, hi, nullptr);
+        if (g_back) SetWindowRgn(g_back, CreateRectRgn(0, 0, 0, 0), FALSE);
         g_glass = g_back && backdrop::Attach(g_back);
     }
     apps::ours.push_back(g_wnd);
